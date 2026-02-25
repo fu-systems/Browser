@@ -56,13 +56,13 @@ Pane takes the opposite approach:
 
 The browser can open a URL, fetch the HTML over HTTP/HTTPS, and display it.
 
-- [ ] **TCP/TLS networking** — Make raw HTTP/1.1 and HTTPS requests. No cookie headers. No referrer headers. Minimal request footprint.
-- [ ] **HTML parser** — Parse HTML5 into a DOM tree. Handle malformed markup gracefully (the real web is messy).
-- [ ] **CSS parser** — Parse inline styles and `<style>` blocks. External stylesheets loaded via `<link>`.
-- [ ] **Layout engine** — Block and inline layout. Box model (margin, padding, border). Basic text flow and wrapping.
-- [ ] **Painting** — Render the laid-out page to a window. Text rendering with system fonts. Background colors and borders.
+- [ ] **Networking** — HTTP/HTTPS requests via `dart:io`. No cookie headers. No referrer headers. Minimal request footprint.
+- [ ] **HTML parser** — Parse HTML5 into a DOM tree. Handle malformed markup gracefully (the real web is messy). Written in pure Dart, no Flutter dependency, to stay portable.
+- [ ] **CSS parser** — Parse inline styles and `<style>` blocks. External stylesheets loaded via `<link>`. Pure Dart, portable.
+- [ ] **Layout engine** — Block and inline layout. Box model (margin, padding, border). Basic text flow and wrapping. Pure Dart, portable.
+- [ ] **Painting** — Render the laid-out page via Flutter `CustomPainter` / `Canvas`. Text rendering with system fonts. Background colors and borders.
 - [ ] **Navigation** — Address bar, clickable links, back/forward history (in-memory only, not persisted).
-- [ ] **Basic UI shell** — Window frame, address bar, back/forward/reload buttons, tab bar.
+- [ ] **Basic UI shell** — Flutter-based window with address bar, back/forward/reload buttons, tab bar.
 
 ### Phase 2 — Make It Usable
 
@@ -97,10 +97,19 @@ Ship official plugins for common needs.
 
 ### Phase 5 — Hardening
 
-- [ ] **Process isolation** — Each tab runs in a separate sandboxed process.
+- [ ] **Process isolation** — Each tab runs in a separate Dart isolate (or OS process if pivoted to C).
 - [ ] **Content Security Policy enforcement** — Even without JS, honor CSP headers to inform rendering decisions.
 - [ ] **Certificate pinning** — TOFU or configurable pinning for TLS certificates.
 - [ ] **Reproducible builds** — Deterministic compilation so users can verify the binary matches the source.
+
+### Long-Term — C Pivot (Contingency)
+
+If Flutter becomes unsustainable, migrate the core engine to C + SDL2.
+
+- [ ] **Port HTML/CSS parsers to C** — The Dart parsers are intentionally written without Flutter-specific APIs, making translation straightforward.
+- [ ] **SDL2 windowing and input** — Replace Flutter's window/input layer with SDL2.
+- [ ] **FreeType + HarfBuzz text rendering** — Replace Flutter's text shaping with direct FreeType/HarfBuzz calls.
+- [ ] **C ABI plugin interface** — Replace Dart isolate-based plugins with shared libraries loaded at runtime.
 
 ---
 
@@ -114,16 +123,19 @@ Ship official plugins for common needs.
 
 ---
 
-## Tech Stack (Planned)
+## Tech Stack
 
 | Component        | Approach                                                  |
 |------------------|-----------------------------------------------------------|
-| Language         | C (core engine), with potential for Rust in security-critical modules |
-| GUI toolkit      | Platform-native (X11/Wayland on Linux, Win32 on Windows, Cocoa on macOS) |
-| TLS              | Minimal vendored library or OS-native TLS                 |
-| Text rendering   | FreeType + HarfBuzz (Linux), DirectWrite (Windows), Core Text (macOS) |
-| Build system     | CMake                                                     |
-| Plugin interface | Shared libraries loaded at runtime with a C ABI           |
+| Language         | Dart                                                      |
+| Framework        | Flutter (cross-platform UI, canvas rendering, text shaping) |
+| Networking       | `dart:io` HttpClient for HTTP/HTTPS requests              |
+| Rendering        | Flutter `CustomPainter` / `Canvas` for page painting      |
+| Plugin isolation | Dart `Isolate`s for sandboxed plugin execution             |
+| Build system     | Flutter CLI (`flutter build`)                              |
+| Targets          | Linux, Windows, macOS (mobile targets possible later)      |
+
+> **Planned pivot:** The Flutter/Dart stack is chosen for development speed and built-in cross-platform support. If Flutter's long-term viability becomes uncertain (e.g. Google deprioritizes or abandons it), the project will pivot to **C with SDL2** for windowing, FreeType + HarfBuzz for text rendering, and a C ABI plugin interface. The parser, layout engine, and plugin architecture are being designed with this potential migration in mind — keeping logic decoupled from Flutter-specific APIs wherever practical.
 
 ---
 
@@ -134,10 +146,8 @@ Ship official plugins for common needs.
 ```sh
 git clone <repo-url> pane
 cd pane
-mkdir build && cd build
-cmake ..
-make
-./pane
+flutter pub get
+flutter run -d linux    # or: -d windows, -d macos
 ```
 
 ---
