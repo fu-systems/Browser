@@ -1,8 +1,9 @@
 /// Tab model — manages per-tab state.
 ///
 /// Each tab has its own URL, page title, history stacks,
-/// scroll position, and rendered layout tree.
+/// scroll position, rendered layout tree, and Phase 2 state.
 
+import 'dart:ui' as ui;
 import '../engine/layout.dart';
 
 class Tab {
@@ -15,6 +16,17 @@ class Tab {
   double pageHeight = 0;
   bool isLoading = false;
   String? errorMessage;
+
+  /// Phase 2: image cache (URL → decoded ui.Image).
+  final Map<String, ui.Image> imageCache = {};
+
+  /// Phase 2: raw HTML source for View Source.
+  String? sourceHtml;
+
+  /// Phase 2: search state.
+  String searchQuery = '';
+  List<Rect> searchRects = [];
+  int searchIndex = -1;
 
   Tab({this.url = '', this.title = 'New Tab'});
 

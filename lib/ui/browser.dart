@@ -2,18 +2,21 @@
 ///
 /// Address bar, back/forward/reload, tab bar, and the rendered page content.
 /// Orchestrates the pipeline: URL → fetch → parse → style → layout → paint.
+/// Phase 2 adds: images, forms, text selection, scrollbar, view source, find.
 
+import 'dart:ui' as ui;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../engine/html_parser.dart';
 import '../engine/css.dart';
 import '../engine/style.dart';
-import '../engine/layout.dart';
+import '../engine/layout.dart' as engine;
 import '../network/fetcher.dart';
 import 'flutter_text_measurer.dart';
 import 'page_painter.dart';
-import 'tab.dart';
+import 'tab.dart' as tab_model;
 
 class BrowserShell extends StatefulWidget {
   const BrowserShell({super.key});
@@ -23,18 +26,33 @@ class BrowserShell extends StatefulWidget {
 }
 
 class _BrowserShellState extends State<BrowserShell> {
-  final List<Tab> _tabs = [Tab()];
+  final List<tab_model.Tab> _tabs = [tab_model.Tab()];
   int _activeTabIndex = 0;
   final TextEditingController _addressController = TextEditingController();
   final FocusNode _addressFocus = FocusNode();
   final FlutterTextMeasurer _textMeasurer = FlutterTextMeasurer();
 
-  Tab get _activeTab => _tabs[_activeTabIndex];
+  // Phase 2: Find on page.
+  bool _showFindBar = false;
+  final TextEditingController _findController = TextEditingController();
+  final FocusNode _findFocus = FocusNode();
+
+  // Phase 2: View source.
+  bool _showSource = false;
+
+  // Phase 2: Text selection.
+  Offset? _selectionStart;
+  Offset? _selectionEnd;
+  String _selectedText = '';
+
+  tab_model.Tab get _activeTab => _tabs[_activeTabIndex];
 
   @override
   void dispose() {
     _addressController.dispose();
     _addressFocus.dispose();
+    _findController.dispose();
+    _findFocus.dispose();
     super.dispose();
   }
 
@@ -43,7 +61,6 @@ class _BrowserShellState extends State<BrowserShell> {
   Future<void> _navigate(String input) async {
     if (input.trim().isEmpty) return;
 
-    // Normalize the URL.
     String url = input.trim();
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
       url = 'https://$url';
@@ -59,6 +76,7 @@ class _BrowserShellState extends State<BrowserShell> {
     setState(() {
       _activeTab.isLoading = true;
       _activeTab.errorMessage = null;
+      _showSource = false;
     });
 
     try {
@@ -68,9 +86,9 @@ class _BrowserShellState extends State<BrowserShell> {
         throw Exception('HTTP ${response.statusCode}');
       }
 
-      // Update URL after redirects.
       _activeTab.url = response.url;
       _addressController.text = response.url;
+      _activeTab.sourceHtml = response.body;
 
       // 2. Parse HTML → DOM.
       final document = HtmlParser.parse(response.body);
@@ -78,13 +96,11 @@ class _BrowserShellState extends State<BrowserShell> {
       // 3. Extract and parse CSS.
       final stylesheets = <Stylesheet>[];
 
-      // Internal <style> blocks.
       final internalCss = document.internalCSS;
       if (internalCss.isNotEmpty) {
         stylesheets.add(CssParser.parse(internalCss));
       }
 
-      // External stylesheets — fetch each one.
       for (final href in document.externalStylesheetUrls) {
         try {
           final cssUrl = Fetcher.resolveUrl(response.url, href);
@@ -92,9 +108,7 @@ class _BrowserShellState extends State<BrowserShell> {
           if (cssResponse.isOk) {
             stylesheets.add(CssParser.parse(cssResponse.body));
           }
-        } catch (_) {
-          // Skip broken stylesheets.
-        }
+        } catch (_) {}
       }
 
       // 4. Compute styles.
@@ -102,9 +116,8 @@ class _BrowserShellState extends State<BrowserShell> {
       final styledTree = computeStyles(body, stylesheets);
 
       // 5. Layout.
-      // We use the viewport width from the widget's constraints.
       final viewportWidth = _viewportWidth;
-      final layoutRoot = layoutTree(styledTree, viewportWidth, _textMeasurer);
+      final layoutRoot = engine.layoutTree(styledTree, viewportWidth, _textMeasurer);
 
       // 6. Update tab state.
       setState(() {
@@ -115,6 +128,9 @@ class _BrowserShellState extends State<BrowserShell> {
         _activeTab.pageHeight = _computePageHeight(layoutRoot);
         _activeTab.isLoading = false;
       });
+
+      // 7. Fetch images in background.
+      _fetchImages(layoutRoot, response.url);
     } catch (e) {
       setState(() {
         _activeTab.isLoading = false;
@@ -124,12 +140,48 @@ class _BrowserShellState extends State<BrowserShell> {
     }
   }
 
-  double get _viewportWidth {
-    final mq = MediaQuery.of(context);
-    return mq.size.width - 16; // Small margin.
+  Future<void> _fetchImages(engine.LayoutBox root, String baseUrl) async {
+    final imageBoxes = root.allBoxes.where((b) => b.imageUrl != null && b.imageUrl!.isNotEmpty).toList();
+    for (final box in imageBoxes) {
+      final src = box.imageUrl!;
+      final resolvedUrl = Fetcher.resolveUrl(baseUrl, src);
+      box.imageUrl = resolvedUrl;
+
+      if (_activeTab.imageCache.containsKey(resolvedUrl)) continue;
+
+      try {
+        final bytes = await Fetcher.fetchBytes(resolvedUrl);
+        if (bytes != null) {
+          final codec = await ui.instantiateImageCodec(bytes);
+          final frame = await codec.getNextFrame();
+          if (mounted) {
+            setState(() {
+              _activeTab.imageCache[resolvedUrl] = frame.image;
+              if (box.imageWidth == 300 && box.imageHeight == 150) {
+                final imgW = frame.image.width.toDouble();
+                final imgH = frame.image.height.toDouble();
+                final maxW = box.content.width > 0 ? box.content.width : _viewportWidth;
+                if (imgW > maxW) {
+                  box.content.width = maxW;
+                  box.content.height = imgH * (maxW / imgW);
+                } else {
+                  box.content.width = imgW;
+                  box.content.height = imgH;
+                }
+              }
+            });
+          }
+        }
+      } catch (_) {}
+    }
   }
 
-  double _computePageHeight(LayoutBox root) {
+  double get _viewportWidth {
+    final mq = MediaQuery.of(context);
+    return mq.size.width - 16;
+  }
+
+  double _computePageHeight(engine.LayoutBox root) {
     double maxY = 0;
     for (final box in root.allBoxes) {
       final bottom = box.marginBox.y + box.marginBox.height;
@@ -169,7 +221,7 @@ class _BrowserShellState extends State<BrowserShell> {
 
   void _addTab() {
     setState(() {
-      _tabs.add(Tab());
+      _tabs.add(tab_model.Tab());
       _activeTabIndex = _tabs.length - 1;
       _addressController.text = '';
     });
@@ -177,7 +229,7 @@ class _BrowserShellState extends State<BrowserShell> {
   }
 
   void _closeTab(int index) {
-    if (_tabs.length <= 1) return; // Keep at least one tab.
+    if (_tabs.length <= 1) return;
     setState(() {
       _tabs.removeAt(index);
       if (_activeTabIndex >= _tabs.length) {
@@ -198,9 +250,10 @@ class _BrowserShellState extends State<BrowserShell> {
 
   void _onScroll(double delta) {
     setState(() {
+      final viewportHeight = MediaQuery.of(context).size.height - 120;
       _activeTab.scrollOffset = (_activeTab.scrollOffset + delta).clamp(
         0.0,
-        (_activeTab.pageHeight - 400).clamp(0.0, double.infinity),
+        (_activeTab.pageHeight - viewportHeight).clamp(0.0, double.infinity),
       );
     });
   }
@@ -217,14 +270,12 @@ class _BrowserShellState extends State<BrowserShell> {
     }
   }
 
-  String? _hitTestLink(LayoutBox box, double x, double y) {
-    // Check children first (they're on top).
+  String? _hitTestLink(engine.LayoutBox box, double x, double y) {
     for (final child in box.children.reversed) {
       final result = _hitTestLink(child, x, y);
       if (result != null) return result;
     }
 
-    // Check this box.
     if (box.linkHref != null && box.linkHref!.isNotEmpty) {
       final r = box.content;
       if (x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height) {
@@ -235,6 +286,146 @@ class _BrowserShellState extends State<BrowserShell> {
     return null;
   }
 
+  // ── Text selection ──────────────────────────────────────────────
+
+  void _onPanStart(DragStartDetails details) {
+    setState(() {
+      _selectionStart = Offset(
+        details.localPosition.dx,
+        details.localPosition.dy + _activeTab.scrollOffset,
+      );
+      _selectionEnd = _selectionStart;
+      _selectedText = '';
+    });
+  }
+
+  void _onPanUpdate(DragUpdateDetails details) {
+    setState(() {
+      _selectionEnd = Offset(
+        details.localPosition.dx,
+        details.localPosition.dy + _activeTab.scrollOffset,
+      );
+    });
+  }
+
+  void _onPanEnd(DragEndDetails details) {
+    if (_activeTab.layoutRoot == null || _selectionStart == null || _selectionEnd == null) return;
+    final text = _extractSelectedText(
+      _activeTab.layoutRoot!,
+      _selectionStart!,
+      _selectionEnd!,
+    );
+    setState(() {
+      _selectedText = text;
+    });
+  }
+
+  String _extractSelectedText(engine.LayoutBox root, Offset start, Offset end) {
+    final top = start.dy < end.dy ? start : end;
+    final bottom = start.dy < end.dy ? end : start;
+
+    final buf = StringBuffer();
+    for (final box in root.allBoxes) {
+      if (box.text == null || box.text!.isEmpty) continue;
+      final r = box.content;
+      final boxBottom = r.y + r.height;
+      if (boxBottom >= top.dy && r.y <= bottom.dy) {
+        buf.write(box.text);
+      }
+    }
+    return buf.toString().trim();
+  }
+
+  void _copySelection() {
+    if (_selectedText.isNotEmpty) {
+      Clipboard.setData(ClipboardData(text: _selectedText));
+    }
+  }
+
+  // ── Find on page ───────────────────────────────────────────────
+
+  void _toggleFind() {
+    setState(() {
+      _showFindBar = !_showFindBar;
+      if (_showFindBar) {
+        _findFocus.requestFocus();
+      } else {
+        _activeTab.searchQuery = '';
+        _activeTab.searchRects = [];
+        _activeTab.searchIndex = -1;
+      }
+    });
+  }
+
+  void _performSearch(String query) {
+    if (query.isEmpty || _activeTab.layoutRoot == null) {
+      setState(() {
+        _activeTab.searchQuery = '';
+        _activeTab.searchRects = [];
+        _activeTab.searchIndex = -1;
+      });
+      return;
+    }
+
+    final rects = <engine.Rect>[];
+    final lowerQuery = query.toLowerCase();
+
+    for (final box in _activeTab.layoutRoot!.allBoxes) {
+      if (box.text == null || box.text!.isEmpty) continue;
+      final text = box.text!.toLowerCase();
+      int idx = 0;
+      while ((idx = text.indexOf(lowerQuery, idx)) != -1) {
+        final r = box.content;
+        final charWidth = r.width / (box.text!.length.clamp(1, 9999));
+        rects.add(engine.Rect(
+          r.x + idx * charWidth,
+          r.y,
+          lowerQuery.length * charWidth,
+          r.height,
+        ));
+        idx += lowerQuery.length;
+      }
+    }
+
+    setState(() {
+      _activeTab.searchQuery = query;
+      _activeTab.searchRects = rects;
+      _activeTab.searchIndex = rects.isNotEmpty ? 0 : -1;
+      if (rects.isNotEmpty) {
+        _activeTab.scrollOffset = (rects[0].y - 100).clamp(0.0, double.infinity);
+      }
+    });
+  }
+
+  void _findNext() {
+    if (_activeTab.searchRects.isEmpty) return;
+    setState(() {
+      _activeTab.searchIndex =
+          (_activeTab.searchIndex + 1) % _activeTab.searchRects.length;
+      final r = _activeTab.searchRects[_activeTab.searchIndex];
+      _activeTab.scrollOffset = (r.y - 100).clamp(0.0, double.infinity);
+    });
+  }
+
+  void _findPrevious() {
+    if (_activeTab.searchRects.isEmpty) return;
+    setState(() {
+      _activeTab.searchIndex =
+          (_activeTab.searchIndex - 1 + _activeTab.searchRects.length) %
+              _activeTab.searchRects.length;
+      final r = _activeTab.searchRects[_activeTab.searchIndex];
+      _activeTab.scrollOffset = (r.y - 100).clamp(0.0, double.infinity);
+    });
+  }
+
+  // ── View Source ────────────────────────────────────────────────
+
+  void _toggleViewSource() {
+    setState(() {
+      _showSource = !_showSource;
+    });
+  }
+
   // ── Keyboard shortcuts ───────────────────────────────────────────
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
@@ -242,7 +433,6 @@ class _BrowserShellState extends State<BrowserShell> {
 
     final ctrl = HardwareKeyboard.instance.isControlPressed;
 
-    // Ctrl+L — focus address bar.
     if (ctrl && event.logicalKey == LogicalKeyboardKey.keyL) {
       _addressFocus.requestFocus();
       _addressController.selection = TextSelection(
@@ -252,62 +442,89 @@ class _BrowserShellState extends State<BrowserShell> {
       return KeyEventResult.handled;
     }
 
-    // Ctrl+T — new tab.
     if (ctrl && event.logicalKey == LogicalKeyboardKey.keyT) {
       _addTab();
       return KeyEventResult.handled;
     }
 
-    // Ctrl+W — close tab.
     if (ctrl && event.logicalKey == LogicalKeyboardKey.keyW) {
       _closeTab(_activeTabIndex);
       return KeyEventResult.handled;
     }
 
-    // F5 — reload.
+    if (ctrl && event.logicalKey == LogicalKeyboardKey.keyF) {
+      _toggleFind();
+      return KeyEventResult.handled;
+    }
+
+    if (ctrl && event.logicalKey == LogicalKeyboardKey.keyU) {
+      _toggleViewSource();
+      return KeyEventResult.handled;
+    }
+
+    if (ctrl && event.logicalKey == LogicalKeyboardKey.keyC) {
+      _copySelection();
+      return KeyEventResult.handled;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      if (_showFindBar) {
+        _toggleFind();
+        return KeyEventResult.handled;
+      }
+      if (_showSource) {
+        setState(() => _showSource = false);
+        return KeyEventResult.handled;
+      }
+    }
+
     if (event.logicalKey == LogicalKeyboardKey.f5) {
       _reload();
       return KeyEventResult.handled;
     }
 
-    // Alt+Left — back.
     if (HardwareKeyboard.instance.isAltPressed &&
         event.logicalKey == LogicalKeyboardKey.arrowLeft) {
       _goBack();
       return KeyEventResult.handled;
     }
 
-    // Alt+Right — forward.
     if (HardwareKeyboard.instance.isAltPressed &&
         event.logicalKey == LogicalKeyboardKey.arrowRight) {
       _goForward();
       return KeyEventResult.handled;
     }
 
-    // Page Down / Space (when not in address bar) — scroll down.
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown && !_addressFocus.hasFocus && !_findFocus.hasFocus) {
+      _onScroll(40);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp && !_addressFocus.hasFocus && !_findFocus.hasFocus) {
+      _onScroll(-40);
+      return KeyEventResult.handled;
+    }
+
     if (event.logicalKey == LogicalKeyboardKey.pageDown ||
-        (event.logicalKey == LogicalKeyboardKey.space && !_addressFocus.hasFocus)) {
+        (event.logicalKey == LogicalKeyboardKey.space && !_addressFocus.hasFocus && !_findFocus.hasFocus)) {
       _onScroll(300);
       return KeyEventResult.handled;
     }
 
-    // Page Up — scroll up.
     if (event.logicalKey == LogicalKeyboardKey.pageUp) {
       _onScroll(-300);
       return KeyEventResult.handled;
     }
 
-    // Home — scroll to top.
-    if (event.logicalKey == LogicalKeyboardKey.home && !_addressFocus.hasFocus) {
+    if (event.logicalKey == LogicalKeyboardKey.home && !_addressFocus.hasFocus && !_findFocus.hasFocus) {
       setState(() => _activeTab.scrollOffset = 0);
       return KeyEventResult.handled;
     }
 
-    // End — scroll to bottom.
-    if (event.logicalKey == LogicalKeyboardKey.end && !_addressFocus.hasFocus) {
+    if (event.logicalKey == LogicalKeyboardKey.end && !_addressFocus.hasFocus && !_findFocus.hasFocus) {
+      final viewportHeight = MediaQuery.of(context).size.height - 120;
       setState(() {
         _activeTab.scrollOffset =
-            (_activeTab.pageHeight - 400).clamp(0.0, double.infinity);
+            (_activeTab.pageHeight - viewportHeight).clamp(0.0, double.infinity);
       });
       return KeyEventResult.handled;
     }
@@ -328,6 +545,7 @@ class _BrowserShellState extends State<BrowserShell> {
           children: [
             _buildTabBar(),
             _buildToolbar(),
+            if (_showFindBar) _buildFindBar(),
             Expanded(child: _buildContent()),
           ],
         ),
@@ -424,7 +642,6 @@ class _BrowserShellState extends State<BrowserShell> {
       ),
       child: Row(
         children: [
-          // Back button.
           IconButton(
             icon: const Icon(Icons.arrow_back, size: 20),
             onPressed: _activeTab.canGoBack ? _goBack : null,
@@ -432,7 +649,6 @@ class _BrowserShellState extends State<BrowserShell> {
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(maxWidth: 36),
           ),
-          // Forward button.
           IconButton(
             icon: const Icon(Icons.arrow_forward, size: 20),
             onPressed: _activeTab.canGoForward ? _goForward : null,
@@ -440,7 +656,6 @@ class _BrowserShellState extends State<BrowserShell> {
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(maxWidth: 36),
           ),
-          // Reload button.
           IconButton(
             icon: Icon(
               _activeTab.isLoading ? Icons.close : Icons.refresh,
@@ -452,7 +667,6 @@ class _BrowserShellState extends State<BrowserShell> {
             constraints: const BoxConstraints(maxWidth: 36),
           ),
           const SizedBox(width: 8),
-          // Address bar.
           Expanded(
             child: Container(
               height: 30,
@@ -477,6 +691,78 @@ class _BrowserShellState extends State<BrowserShell> {
               ),
             ),
           ),
+          const SizedBox(width: 4),
+          IconButton(
+            icon: const Icon(Icons.code, size: 20),
+            onPressed: _activeTab.sourceHtml != null ? _toggleViewSource : null,
+            tooltip: 'View Source (Ctrl+U)',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(maxWidth: 36),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFindBar() {
+    final count = _activeTab.searchRects.length;
+    final idx = _activeTab.searchIndex;
+    return Container(
+      height: 40,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8E1),
+        border: Border(bottom: BorderSide(color: Colors.grey.shade300)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.search, size: 18, color: Colors.grey),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 200,
+            child: TextField(
+              controller: _findController,
+              focusNode: _findFocus,
+              style: const TextStyle(fontSize: 13),
+              decoration: const InputDecoration(
+                hintText: 'Find on page...',
+                hintStyle: TextStyle(fontSize: 13, color: Colors.grey),
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(vertical: 8),
+              ),
+              onChanged: _performSearch,
+              onSubmitted: (_) => _findNext(),
+            ),
+          ),
+          if (count > 0) ...[
+            const SizedBox(width: 8),
+            Text(
+              '${idx + 1}/$count',
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+            ),
+          ],
+          IconButton(
+            icon: const Icon(Icons.keyboard_arrow_up, size: 18),
+            onPressed: _findPrevious,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(maxWidth: 30),
+            tooltip: 'Previous',
+          ),
+          IconButton(
+            icon: const Icon(Icons.keyboard_arrow_down, size: 18),
+            onPressed: _findNext,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(maxWidth: 30),
+            tooltip: 'Next',
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, size: 16),
+            onPressed: _toggleFind,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(maxWidth: 30),
+            tooltip: 'Close',
+          ),
         ],
       ),
     );
@@ -487,6 +773,10 @@ class _BrowserShellState extends State<BrowserShell> {
       return _buildErrorPage();
     }
 
+    if (_showSource && _activeTab.sourceHtml != null) {
+      return _buildSourceView();
+    }
+
     if (_activeTab.layoutRoot == null && !_activeTab.isLoading) {
       return _buildStartPage();
     }
@@ -495,28 +785,165 @@ class _BrowserShellState extends State<BrowserShell> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    return Listener(
-      onPointerSignal: (event) {
-        if (event is PointerScrollEvent) {
-          _onScroll(event.scrollDelta.dy);
-        }
-      },
-      child: GestureDetector(
-        onTap: () {
-          // We need the tap position — use onTapDown instead.
-        },
-        onTapDown: (details) {
-          _onTapPage(details.localPosition);
-        },
-        child: ClipRect(
-          child: CustomPaint(
-            painter: PagePainter(
-              rootBox: _activeTab.layoutRoot,
-              scrollOffset: _activeTab.scrollOffset,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final viewportHeight = constraints.maxHeight;
+        final pageHeight = _activeTab.pageHeight;
+        final scrollFraction = pageHeight > viewportHeight
+            ? _activeTab.scrollOffset / (pageHeight - viewportHeight)
+            : 0.0;
+        final double thumbHeight = pageHeight > 0
+            ? (viewportHeight / pageHeight * viewportHeight).clamp(30.0, viewportHeight).toDouble()
+            : viewportHeight;
+
+        return Stack(
+          children: [
+            Listener(
+              onPointerSignal: (event) {
+                if (event is PointerScrollEvent) {
+                  _onScroll(event.scrollDelta.dy);
+                }
+              },
+              child: GestureDetector(
+                onTapDown: (details) => _onTapPage(details.localPosition),
+                onPanStart: _onPanStart,
+                onPanUpdate: _onPanUpdate,
+                onPanEnd: _onPanEnd,
+                child: ClipRect(
+                  child: Stack(
+                    children: [
+                      CustomPaint(
+                        painter: PagePainter(
+                          rootBox: _activeTab.layoutRoot,
+                          scrollOffset: _activeTab.scrollOffset,
+                          imageCache: _activeTab.imageCache,
+                          searchQuery: _activeTab.searchQuery,
+                          currentSearchIndex: _activeTab.searchIndex,
+                          searchRects: _activeTab.searchRects,
+                        ),
+                        size: Size.infinite,
+                      ),
+                      if (_selectionStart != null && _selectionEnd != null)
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: CustomPaint(
+                              painter: _SelectionPainter(
+                                start: _selectionStart!,
+                                end: _selectionEnd!,
+                                scrollOffset: _activeTab.scrollOffset,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
             ),
-            size: Size.infinite,
+            // Scrollbar.
+            if (pageHeight > viewportHeight)
+              Positioned(
+                right: 0,
+                top: 0,
+                bottom: 0,
+                width: 8,
+                child: GestureDetector(
+                  onVerticalDragUpdate: (details) {
+                    final fraction = details.localPosition.dy / viewportHeight;
+                    setState(() {
+                      _activeTab.scrollOffset = (fraction * (pageHeight - viewportHeight))
+                          .clamp(0.0, (pageHeight - viewportHeight).clamp(0.0, double.infinity));
+                    });
+                  },
+                  child: Container(
+                    color: Colors.grey.shade200.withValues(alpha: 0.5),
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      child: Container(
+                        margin: EdgeInsets.only(top: scrollFraction * (viewportHeight - thumbHeight)),
+                        width: 8,
+                        height: thumbHeight,
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade500.withValues(alpha: 0.6),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            if (_selectedText.isNotEmpty)
+              Positioned(
+                bottom: 4,
+                right: 16,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.black87,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    'Ctrl+C to copy (${_selectedText.length} chars)',
+                    style: const TextStyle(color: Colors.white, fontSize: 11),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildSourceView() {
+    return Container(
+      color: const Color(0xFF1E1E1E),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            color: const Color(0xFF2D2D2D),
+            child: Row(
+              children: [
+                const Text(
+                  'Page Source',
+                  style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500),
+                ),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.copy, size: 16, color: Colors.white70),
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: _activeTab.sourceHtml ?? ''));
+                  },
+                  tooltip: 'Copy source',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(maxWidth: 30),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 16, color: Colors.white70),
+                  onPressed: _toggleViewSource,
+                  tooltip: 'Close',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(maxWidth: 30),
+                ),
+              ],
+            ),
           ),
-        ),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(12),
+              child: SelectableText(
+                _activeTab.sourceHtml ?? '',
+                style: const TextStyle(
+                  color: Color(0xFFD4D4D4),
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                  height: 1.5,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -583,5 +1010,30 @@ class _BrowserShellState extends State<BrowserShell> {
         ),
       ),
     );
+  }
+}
+
+/// Paints a translucent selection rectangle.
+class _SelectionPainter extends CustomPainter {
+  final Offset start;
+  final Offset end;
+  final double scrollOffset;
+
+  _SelectionPainter({required this.start, required this.end, required this.scrollOffset});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final s = Offset(start.dx, start.dy - scrollOffset);
+    final e = Offset(end.dx, end.dy - scrollOffset);
+
+    canvas.drawRect(
+      Rect.fromPoints(s, e),
+      Paint()..color = Colors.blue.withValues(alpha: 0.2),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _SelectionPainter oldDelegate) {
+    return start != oldDelegate.start || end != oldDelegate.end || scrollOffset != oldDelegate.scrollOffset;
   }
 }
