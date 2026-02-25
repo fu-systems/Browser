@@ -265,7 +265,9 @@ void _layoutBlockChildren(
       _layoutInlineContent(child, containerWidth, measurer);
       cursorY = child.marginBox.y + child.marginBox.height;
     } else {
-      _layoutBlock(child, containerWidth, measurer);
+      // Compute dimensions to get margin/border/padding values.
+      _computeBoxDimensions(child, containerWidth);
+      // Set position BEFORE layout so children use correct parent coordinates.
       child.content.x = box.content.x +
           child.margin.left +
           child.border.left +
@@ -274,7 +276,6 @@ void _layoutBlockChildren(
           child.margin.top +
           child.border.top +
           child.padding.top;
-      // Re-layout with correct position.
       _layoutBlock(child, containerWidth, measurer);
       cursorY = child.marginBox.y + child.marginBox.height;
     }
@@ -306,6 +307,9 @@ void _layoutInlineContent(
   // Collect all inline items (text runs + replaced elements).
   final items = <_InlineItem>[];
   _collectInlineItems(box, items);
+
+  // Clear original children; only properly-positioned generated boxes will be added below.
+  box.children.clear();
 
   if (items.isEmpty) return;
 
