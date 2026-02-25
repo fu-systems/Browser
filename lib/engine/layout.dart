@@ -256,28 +256,32 @@ void _layoutBlockChildren(
   double cursorY = box.content.y;
 
   for (final child in box.children) {
-    if (child.layoutType == LayoutType.text ||
-        child.layoutType == LayoutType.inline) {
-      // Wrap inline content in an anonymous block.
-      _computeBoxDimensions(child, containerWidth);
-      child.content.x = box.content.x + child.margin.left + child.border.left + child.padding.left;
-      child.content.y = cursorY + child.margin.top + child.border.top + child.padding.top;
-      _layoutInlineContent(child, containerWidth, measurer);
-      cursorY = child.marginBox.y + child.marginBox.height;
-    } else {
-      // Compute dimensions to get margin/border/padding values.
-      _computeBoxDimensions(child, containerWidth);
-      // Set position BEFORE layout so children use correct parent coordinates.
-      child.content.x = box.content.x +
-          child.margin.left +
-          child.border.left +
-          child.padding.left;
-      child.content.y = cursorY +
-          child.margin.top +
-          child.border.top +
-          child.padding.top;
-      _layoutBlock(child, containerWidth, measurer);
-      cursorY = child.marginBox.y + child.marginBox.height;
+    try {
+      if (child.layoutType == LayoutType.text ||
+          child.layoutType == LayoutType.inline) {
+        // Wrap inline content in an anonymous block.
+        _computeBoxDimensions(child, containerWidth);
+        child.content.x = box.content.x + child.margin.left + child.border.left + child.padding.left;
+        child.content.y = cursorY + child.margin.top + child.border.top + child.padding.top;
+        _layoutInlineContent(child, containerWidth, measurer);
+        cursorY = child.marginBox.y + child.marginBox.height;
+      } else {
+        // Compute dimensions to get margin/border/padding values.
+        _computeBoxDimensions(child, containerWidth);
+        // Set position BEFORE layout so children use correct parent coordinates.
+        child.content.x = box.content.x +
+            child.margin.left +
+            child.border.left +
+            child.padding.left;
+        child.content.y = cursorY +
+            child.margin.top +
+            child.border.top +
+            child.padding.top;
+        _layoutBlock(child, containerWidth, measurer);
+        cursorY = child.marginBox.y + child.marginBox.height;
+      }
+    } catch (_) {
+      // Skip this child on error; continue laying out remaining content.
     }
   }
 }
@@ -311,6 +315,24 @@ void _layoutInlineContent(
   // Clear original children; only properly-positioned generated boxes will be added below.
   box.children.clear();
 
+  // If this box IS a text node with no collected children, measure its own text.
+  if (items.isEmpty && box.text != null && box.text!.isNotEmpty) {
+    final s = box.styledNode;
+    final fontSize = _parsePx(s?.prop('font-size', '16px') ?? '16px', 16);
+    final metrics = measurer.measureText(
+      box.text!,
+      fontSize: fontSize,
+      fontFamily: s?.prop('font-family', 'serif') ?? 'serif',
+      fontWeight: s?.prop('font-weight', 'normal') ?? 'normal',
+      fontStyle: s?.prop('font-style', 'normal') ?? 'normal',
+      maxWidth: containerWidth,
+    );
+    box.textLines = metrics.lines;
+    box.content.height = metrics.height;
+    if (box.content.width <= 0) box.content.width = metrics.width;
+    return;
+  }
+
   if (items.isEmpty) return;
 
   double cursorX = box.content.x;
@@ -338,7 +360,7 @@ void _layoutInlineContent(
       box.children.add(rb);
       cursorX += w;
       lineHeight = math.max(lineHeight, h);
-    } else {
+    } else if (item.textRun != null) {
       // Text run.
       final run = item.textRun!;
       final fontSize = _parsePx(run.fontSize, 16);
@@ -414,7 +436,9 @@ void _collectInlineItems(LayoutBox box, List<_InlineItem> items) {
         styledNode: s,
         linkHref: child.linkHref,
       )));
-    } else if (child.layoutType == LayoutType.inline) {
+    } else if (child.children.isNotEmpty) {
+      // Recurse into any child with descendants — covers inline wrappers
+      // AND block elements nested inside inline parents (common in real HTML).
       _collectInlineItems(child, items);
     }
   }
