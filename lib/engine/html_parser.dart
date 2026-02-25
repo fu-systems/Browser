@@ -85,12 +85,12 @@ class HtmlParser {
         } else if (node is Element && node.tagName == 'body') {
           bodyEl = node;
         } else {
-          bodyEl.appendChild(node);
+          bodyEl!.appendChild(node);
         }
       }
       headEl ??= Element('head');
       htmlEl.appendChild(headEl);
-      htmlEl.appendChild(bodyEl);
+      htmlEl.appendChild(bodyEl!);
     } else {
       // We have <html>. Ensure head and body exist.
       for (final child in htmlEl.children) {

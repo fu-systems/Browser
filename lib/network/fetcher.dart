@@ -5,6 +5,7 @@
 
 import 'dart:io';
 import 'dart:convert';
+import 'dart:typed_data';
 
 class FetchResponse {
   final int statusCode;
@@ -94,6 +95,49 @@ class Fetcher {
       headers: {},
       url: currentUrl,
     );
+  }
+
+  /// Fetch raw bytes from a URL (for images). Follows redirects.
+  static Future<Uint8List?> fetchBytes(String url) async {
+    var currentUrl = url;
+    const maxRedirects = 5;
+
+    for (int i = 0; i < maxRedirects; i++) {
+      final uri = Uri.parse(currentUrl);
+      final request = await _client.getUrl(uri);
+      request.headers.removeAll('cookie');
+      request.headers.removeAll('referer');
+      request.followRedirects = false;
+
+      final response = await request.close();
+      final statusCode = response.statusCode;
+
+      if (statusCode >= 300 && statusCode < 400) {
+        final location = response.headers.value('location');
+        if (location == null) break;
+        currentUrl = uri.resolve(location).toString();
+        await response.drain();
+        continue;
+      }
+
+      if (statusCode < 200 || statusCode >= 300) {
+        await response.drain();
+        return null;
+      }
+
+      final chunks = await response.toList();
+      final totalLength = chunks.fold<int>(0, (sum, c) => sum + c.length);
+      // Limit image size to 5 MB.
+      if (totalLength > 5 * 1024 * 1024) return null;
+      final bytes = Uint8List(totalLength);
+      int offset = 0;
+      for (final chunk in chunks) {
+        bytes.setRange(offset, offset + chunk.length, chunk);
+        offset += chunk.length;
+      }
+      return bytes;
+    }
+    return null;
   }
 
   /// Resolve a possibly-relative URL against a base URL.

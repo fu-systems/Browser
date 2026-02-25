@@ -1,19 +1,30 @@
 /// Page painter — renders the layout tree onto a Flutter Canvas.
 ///
-/// Walks the LayoutBox tree and draws backgrounds, borders, and text
-/// using Flutter's Canvas API via CustomPainter.
+/// Walks the LayoutBox tree and draws backgrounds, borders, text,
+/// images, and form element placeholders using Flutter's Canvas API.
 
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-import '../engine/layout.dart';
+import '../engine/layout.dart' as engine;
 import '../engine/style.dart';
-import '../engine/dom.dart';
+import '../engine/dom.dart' as dom;
 
 class PagePainter extends CustomPainter {
-  final LayoutBox? rootBox;
+  final engine.LayoutBox? rootBox;
   final double scrollOffset;
+  final Map<String, ui.Image> imageCache;
+  final String searchQuery;
+  final int currentSearchIndex;
+  final List<engine.Rect> searchRects;
 
-  PagePainter({this.rootBox, this.scrollOffset = 0});
+  PagePainter({
+    this.rootBox,
+    this.scrollOffset = 0,
+    this.imageCache = const {},
+    this.searchQuery = '',
+    this.currentSearchIndex = -1,
+    this.searchRects = const [],
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -21,38 +32,61 @@ class PagePainter extends CustomPainter {
 
     canvas.save();
     canvas.translate(0, -scrollOffset);
+
     _paintBox(canvas, rootBox!);
+
+    // Paint search highlights.
+    if (searchRects.isNotEmpty) {
+      for (int i = 0; i < searchRects.length; i++) {
+        final r = searchRects[i];
+        final paint = Paint()
+          ..color = i == currentSearchIndex
+              ? Colors.orange.withValues(alpha: 0.6)
+              : Colors.yellow.withValues(alpha: 0.4);
+        canvas.drawRect(
+          ui.Rect.fromLTWH(r.x, r.y, r.width, r.height),
+          paint,
+        );
+      }
+    }
+
     canvas.restore();
   }
 
-  void _paintBox(Canvas canvas, LayoutBox box) {
+  void _paintBox(Canvas canvas, engine.LayoutBox box) {
     _paintBackground(canvas, box);
     _paintBorders(canvas, box);
     _paintHr(canvas, box);
 
-    // Paint text.
+    if (box.imageUrl != null && box.imageUrl!.isNotEmpty) {
+      _paintImage(canvas, box);
+    }
+
+    if (box.formTag != null) {
+      _paintFormElement(canvas, box);
+    }
+
     if (box.text != null && box.text!.isNotEmpty) {
       _paintText(canvas, box);
     }
 
-    // Paint children.
     for (final child in box.children) {
       _paintBox(canvas, child);
     }
   }
 
-  void _paintBackground(Canvas canvas, LayoutBox box) {
+  void _paintBackground(Canvas canvas, engine.LayoutBox box) {
     final bgColor = _resolveColor(box.styledNode?['background-color'] ?? box.styledNode?['background'] ?? '');
     if (bgColor == null) return;
 
     final rect = box.paddingBox;
     canvas.drawRect(
-      Rect.fromLTWH(rect.x, rect.y, rect.width, rect.height),
+      ui.Rect.fromLTWH(rect.x, rect.y, rect.width, rect.height),
       Paint()..color = bgColor,
     );
   }
 
-  void _paintBorders(Canvas canvas, LayoutBox box) {
+  void _paintBorders(Canvas canvas, engine.LayoutBox box) {
     final bw = box.border;
     if (bw.top == 0 && bw.right == 0 && bw.bottom == 0 && bw.left == 0) return;
 
@@ -66,41 +100,25 @@ class PagePainter extends CustomPainter {
 
     if (bw.top > 0) {
       paint.strokeWidth = bw.top;
-      canvas.drawLine(
-        Offset(rect.x, rect.y),
-        Offset(rect.x + rect.width, rect.y),
-        paint,
-      );
+      canvas.drawLine(Offset(rect.x, rect.y), Offset(rect.x + rect.width, rect.y), paint);
     }
     if (bw.right > 0) {
       paint.strokeWidth = bw.right;
-      canvas.drawLine(
-        Offset(rect.x + rect.width, rect.y),
-        Offset(rect.x + rect.width, rect.y + rect.height),
-        paint,
-      );
+      canvas.drawLine(Offset(rect.x + rect.width, rect.y), Offset(rect.x + rect.width, rect.y + rect.height), paint);
     }
     if (bw.bottom > 0) {
       paint.strokeWidth = bw.bottom;
-      canvas.drawLine(
-        Offset(rect.x, rect.y + rect.height),
-        Offset(rect.x + rect.width, rect.y + rect.height),
-        paint,
-      );
+      canvas.drawLine(Offset(rect.x, rect.y + rect.height), Offset(rect.x + rect.width, rect.y + rect.height), paint);
     }
     if (bw.left > 0) {
       paint.strokeWidth = bw.left;
-      canvas.drawLine(
-        Offset(rect.x, rect.y),
-        Offset(rect.x, rect.y + rect.height),
-        paint,
-      );
+      canvas.drawLine(Offset(rect.x, rect.y), Offset(rect.x, rect.y + rect.height), paint);
     }
   }
 
-  void _paintHr(Canvas canvas, LayoutBox box) {
-    if (box.styledNode?.node is! Element) return;
-    if ((box.styledNode!.node as Element).tagName != 'hr') return;
+  void _paintHr(Canvas canvas, engine.LayoutBox box) {
+    if (box.styledNode?.node is! dom.Element) return;
+    if ((box.styledNode!.node as dom.Element).tagName != 'hr') return;
 
     final r = box.content;
     canvas.drawLine(
@@ -110,7 +128,110 @@ class PagePainter extends CustomPainter {
     );
   }
 
-  void _paintText(Canvas canvas, LayoutBox box) {
+  void _paintImage(Canvas canvas, engine.LayoutBox box) {
+    final r = box.content;
+    final img = imageCache[box.imageUrl];
+    if (img != null) {
+      final src = ui.Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble());
+      final dst = ui.Rect.fromLTWH(r.x, r.y, r.width, r.height);
+      canvas.drawImageRect(img, src, dst, Paint());
+    } else {
+      final rect = ui.Rect.fromLTWH(r.x, r.y, r.width, r.height);
+      canvas.drawRect(rect, Paint()..color = const Color(0xFFF0F0F0));
+      canvas.drawRect(
+        rect,
+        Paint()
+          ..color = const Color(0xFFCCCCCC)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1,
+      );
+      final iconPaint = Paint()..color = const Color(0xFFAAAAAA);
+      final cx = r.x + r.width / 2;
+      final cy = r.y + r.height / 2;
+      canvas.drawRect(ui.Rect.fromCenter(center: Offset(cx, cy), width: 16, height: 12), iconPaint);
+    }
+  }
+
+  void _paintFormElement(Canvas canvas, engine.LayoutBox box) {
+    final r = box.content;
+    final tag = box.formTag!;
+    final type = box.formType ?? 'text';
+
+    if (type == 'hidden') return;
+
+    if (type == 'checkbox') {
+      final rect = ui.Rect.fromLTWH(r.x, r.y, 14, 14);
+      canvas.drawRect(rect, Paint()..color = Colors.white);
+      canvas.drawRect(rect, Paint()..color = Colors.grey..style = PaintingStyle.stroke..strokeWidth = 1.5);
+      return;
+    }
+
+    if (type == 'radio') {
+      canvas.drawCircle(Offset(r.x + 7, r.y + 7), 7, Paint()..color = Colors.white);
+      canvas.drawCircle(Offset(r.x + 7, r.y + 7), 7, Paint()..color = Colors.grey..style = PaintingStyle.stroke..strokeWidth = 1.5);
+      return;
+    }
+
+    if (tag == 'button' || type == 'submit' || type == 'reset' || type == 'button') {
+      final rrect = RRect.fromRectAndRadius(
+        ui.Rect.fromLTWH(r.x, r.y, r.width, r.height),
+        const Radius.circular(3),
+      );
+      canvas.drawRRect(rrect, Paint()..color = const Color(0xFFE8E8E8));
+      canvas.drawRRect(rrect, Paint()..color = Colors.grey..style = PaintingStyle.stroke..strokeWidth = 1);
+      final label = box.formValue?.isNotEmpty == true ? box.formValue! : (type == 'submit' ? 'Submit' : 'Button');
+      _drawLabel(canvas, label, r, Colors.black, 12);
+      return;
+    }
+
+    if (tag == 'select') {
+      final rect = ui.Rect.fromLTWH(r.x, r.y, r.width, r.height);
+      canvas.drawRect(rect, Paint()..color = Colors.white);
+      canvas.drawRect(rect, Paint()..color = Colors.grey..style = PaintingStyle.stroke..strokeWidth = 1);
+      final arrowX = r.x + r.width - 16;
+      final arrowY = r.y + r.height / 2;
+      final path = Path()
+        ..moveTo(arrowX, arrowY - 3)
+        ..lineTo(arrowX + 8, arrowY - 3)
+        ..lineTo(arrowX + 4, arrowY + 3)
+        ..close();
+      canvas.drawPath(path, Paint()..color = Colors.grey);
+      return;
+    }
+
+    if (tag == 'textarea') {
+      final rect = ui.Rect.fromLTWH(r.x, r.y, r.width, r.height);
+      canvas.drawRect(rect, Paint()..color = Colors.white);
+      canvas.drawRect(rect, Paint()..color = Colors.grey..style = PaintingStyle.stroke..strokeWidth = 1);
+      if (box.formPlaceholder?.isNotEmpty == true) {
+        _drawLabel(canvas, box.formPlaceholder!, r, Colors.grey, 12);
+      }
+      return;
+    }
+
+    // Default: text input.
+    final rect = ui.Rect.fromLTWH(r.x, r.y, r.width, r.height);
+    canvas.drawRect(rect, Paint()..color = Colors.white);
+    canvas.drawRect(rect, Paint()..color = Colors.grey..style = PaintingStyle.stroke..strokeWidth = 1);
+    if (box.formPlaceholder?.isNotEmpty == true) {
+      _drawLabel(canvas, box.formPlaceholder!, r, Colors.grey.shade400, 12);
+    }
+  }
+
+  void _drawLabel(Canvas canvas, String text, engine.Rect r, Color color, double fontSize) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(color: color, fontSize: fontSize),
+      ),
+      textDirection: ui.TextDirection.ltr,
+    );
+    painter.layout(maxWidth: r.width - 8);
+    painter.paint(canvas, Offset(r.x + 4, r.y + (r.height - painter.height) / 2));
+    painter.dispose();
+  }
+
+  void _paintText(Canvas canvas, engine.LayoutBox box) {
     final styled = box.styledNode;
     final text = box.text!;
 
@@ -147,7 +268,6 @@ class PagePainter extends CustomPainter {
 
   Color _resolveBorderColor(StyledNode? styled) {
     if (styled == null) return Colors.black;
-    // Try border-color, then extract from border shorthand.
     final bc = styled['border-color'];
     if (bc != null) return _resolveColor(bc) ?? Colors.black;
     final border = styled['border'] ?? styled['border-top'] ?? '';
@@ -161,7 +281,10 @@ class PagePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant PagePainter oldDelegate) {
     return oldDelegate.rootBox != rootBox ||
-        oldDelegate.scrollOffset != scrollOffset;
+        oldDelegate.scrollOffset != scrollOffset ||
+        oldDelegate.searchQuery != searchQuery ||
+        oldDelegate.currentSearchIndex != currentSearchIndex ||
+        oldDelegate.imageCache.length != imageCache.length;
   }
 }
 
@@ -170,11 +293,9 @@ class PagePainter extends CustomPainter {
 Color? _resolveColor(String value) {
   if (value.isEmpty || value == 'transparent') return null;
 
-  // Named colors.
   final named = _namedColors[value.toLowerCase()];
   if (named != null) return named;
 
-  // #RGB, #RRGGBB, #RRGGBBAA.
   if (value.startsWith('#')) {
     final hex = value.substring(1);
     if (hex.length == 3) {
@@ -198,7 +319,6 @@ Color? _resolveColor(String value) {
     }
   }
 
-  // rgb(r, g, b) and rgba(r, g, b, a).
   final rgbMatch = RegExp(r'rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+))?\s*\)').firstMatch(value);
   if (rgbMatch != null) {
     final r = int.parse(rgbMatch.group(1)!);

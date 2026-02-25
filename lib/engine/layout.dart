@@ -8,6 +8,7 @@
 /// so the engine stays independent of Flutter.
 
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dom.dart';
 import 'style.dart';
 
@@ -82,6 +83,18 @@ class LayoutBox {
   /// For link detection: the href if this box is inside an <a> tag.
   String? linkHref;
 
+  /// For image boxes: the resolved image URL and fetched bytes.
+  String? imageUrl;
+  Uint8List? imageBytes;
+  double imageWidth = 0;
+  double imageHeight = 0;
+
+  /// For form elements: tag + type info for painting.
+  String? formTag;
+  String? formType;
+  String? formValue;
+  String? formPlaceholder;
+
   LayoutBox(this.layoutType, [this.styledNode]);
 
   Rect get paddingBox => content.expandedBy(padding);
@@ -129,10 +142,37 @@ LayoutBox _buildLayoutTree(StyledNode styled, String? parentHref) {
 
   final display = styled.display;
   if (display == Display.none) {
-    // Return an empty box that will be skipped.
     final box = LayoutBox(LayoutType.block, styled);
     box.content = Rect(0, 0, 0, 0);
     return box;
+  }
+
+  // Image element → inline-replaced box.
+  if (styled.node is Element && (styled.node as Element).tagName == 'img') {
+    final el = styled.node as Element;
+    final box = LayoutBox(LayoutType.inline, styled);
+    box.linkHref = href;
+    box.imageUrl = el.attributes['src'] ?? '';
+    final w = double.tryParse(el.attributes['width'] ?? '') ?? 0;
+    final h = double.tryParse(el.attributes['height'] ?? '') ?? 0;
+    box.imageWidth = w > 0 ? w : 300;
+    box.imageHeight = h > 0 ? h : 150;
+    return box;
+  }
+
+  // Form elements → display-only boxes.
+  if (styled.node is Element) {
+    final el = styled.node as Element;
+    final tag = el.tagName;
+    if (tag == 'input' || tag == 'button' || tag == 'select' || tag == 'textarea') {
+      final box = LayoutBox(LayoutType.inline, styled);
+      box.linkHref = href;
+      box.formTag = tag;
+      box.formType = el.attributes['type'] ?? (tag == 'button' ? 'button' : 'text');
+      box.formValue = el.attributes['value'] ?? el.textContent;
+      box.formPlaceholder = el.attributes['placeholder'] ?? '';
+      return box;
+    }
   }
 
   final type = (display == Display.inline || display == Display.inlineBlock)
@@ -263,60 +303,113 @@ void _layoutInlineContent(
   double containerWidth,
   TextMeasurer measurer,
 ) {
-  // Collect all text from inline children into a text run,
-  // then measure and break into lines.
-  final runs = <_TextRun>[];
-  _collectTextRuns(box, runs);
+  // Collect all inline items (text runs + replaced elements).
+  final items = <_InlineItem>[];
+  _collectInlineItems(box, items);
 
-  if (runs.isEmpty) return;
+  if (items.isEmpty) return;
 
-  // Simple line-breaking: concatenate text, measure, then break.
   double cursorX = box.content.x;
   double cursorY = box.content.y;
   double lineHeight = 0;
-  double maxWidth = 0;
 
-  for (final run in runs) {
-    final fontSize = _parsePx(run.fontSize, 16);
-    final metrics = measurer.measureText(
-      run.text,
-      fontSize: fontSize,
-      fontFamily: run.fontFamily,
-      fontWeight: run.fontWeight,
-      fontStyle: run.fontStyle,
-      maxWidth: containerWidth,
-    );
+  for (final item in items) {
+    if (item.replacedBox != null) {
+      // Replaced element (image or form).
+      final rb = item.replacedBox!;
+      final w = rb.imageUrl != null
+          ? math.min(rb.imageWidth, containerWidth)
+          : _formBoxWidth(rb);
+      final h = rb.imageUrl != null
+          ? (rb.imageWidth > 0 ? rb.imageHeight * (w / rb.imageWidth) : rb.imageHeight)
+          : _formBoxHeight(rb);
 
-    for (final line in metrics.lines) {
-      // Does this line fit on the current line?
-      if (cursorX + line.width > box.content.x + containerWidth &&
-          cursorX > box.content.x) {
-        // Wrap to next line.
+      if (cursorX + w > box.content.x + containerWidth && cursorX > box.content.x) {
         cursorX = box.content.x;
         cursorY += lineHeight;
         lineHeight = 0;
       }
 
-      // Place a text box for this line.
-      final textBox = LayoutBox(LayoutType.text, run.styledNode);
-      textBox.text = line.text;
-      textBox.textLines = [line];
-      textBox.linkHref = run.linkHref;
-      textBox.content = Rect(cursorX, cursorY, line.width, line.height);
-      box.children.add(textBox);
+      rb.content = Rect(cursorX, cursorY, w, h);
+      box.children.add(rb);
+      cursorX += w;
+      lineHeight = math.max(lineHeight, h);
+    } else {
+      // Text run.
+      final run = item.textRun!;
+      final fontSize = _parsePx(run.fontSize, 16);
+      final metrics = measurer.measureText(
+        run.text,
+        fontSize: fontSize,
+        fontFamily: run.fontFamily,
+        fontWeight: run.fontWeight,
+        fontStyle: run.fontStyle,
+        maxWidth: containerWidth,
+      );
 
-      cursorX += line.width;
-      lineHeight = math.max(lineHeight, line.height);
-      maxWidth = math.max(maxWidth, cursorX - box.content.x);
+      for (final line in metrics.lines) {
+        if (cursorX + line.width > box.content.x + containerWidth &&
+            cursorX > box.content.x) {
+          cursorX = box.content.x;
+          cursorY += lineHeight;
+          lineHeight = 0;
+        }
+
+        final textBox = LayoutBox(LayoutType.text, run.styledNode);
+        textBox.text = line.text;
+        textBox.textLines = [line];
+        textBox.linkHref = run.linkHref;
+        textBox.content = Rect(cursorX, cursorY, line.width, line.height);
+        box.children.add(textBox);
+
+        cursorX += line.width;
+        lineHeight = math.max(lineHeight, line.height);
+      }
     }
   }
 
-  // Clear original inline children (we replaced them with text boxes).
-  // Actually, keep them — we added new children above. We need to be
-  // careful here. Let's use a different approach: place inline children
-  // by measuring their text content.
-
   box.content.height = (cursorY - box.content.y) + lineHeight;
+}
+
+double _formBoxWidth(LayoutBox box) {
+  if (box.formTag == 'textarea') return 200;
+  if (box.formTag == 'select') return 150;
+  if (box.formTag == 'button') return 80;
+  if (box.formType == 'checkbox' || box.formType == 'radio') return 16;
+  return 170; // text input default
+}
+
+double _formBoxHeight(LayoutBox box) {
+  if (box.formTag == 'textarea') return 60;
+  if (box.formType == 'checkbox' || box.formType == 'radio') return 16;
+  return 24;
+}
+
+class _InlineItem {
+  final _TextRun? textRun;
+  final LayoutBox? replacedBox;
+  _InlineItem({this.textRun, this.replacedBox});
+}
+
+void _collectInlineItems(LayoutBox box, List<_InlineItem> items) {
+  for (final child in box.children) {
+    if (child.imageUrl != null || child.formTag != null) {
+      items.add(_InlineItem(replacedBox: child));
+    } else if (child.text != null && child.text!.isNotEmpty) {
+      final s = child.styledNode;
+      items.add(_InlineItem(textRun: _TextRun(
+        text: child.text!,
+        fontSize: s?.prop('font-size', '16px') ?? '16px',
+        fontFamily: s?.prop('font-family', 'serif') ?? 'serif',
+        fontWeight: s?.prop('font-weight', 'normal') ?? 'normal',
+        fontStyle: s?.prop('font-style', 'normal') ?? 'normal',
+        styledNode: s,
+        linkHref: child.linkHref,
+      )));
+    } else if (child.layoutType == LayoutType.inline) {
+      _collectInlineItems(child, items);
+    }
+  }
 }
 
 class _TextRun {
@@ -339,24 +432,6 @@ class _TextRun {
   });
 }
 
-void _collectTextRuns(LayoutBox box, List<_TextRun> runs) {
-  for (final child in box.children) {
-    if (child.text != null && child.text!.isNotEmpty) {
-      final s = child.styledNode;
-      runs.add(_TextRun(
-        text: child.text!,
-        fontSize: s?.prop('font-size', '16px') ?? '16px',
-        fontFamily: s?.prop('font-family', 'serif') ?? 'serif',
-        fontWeight: s?.prop('font-weight', 'normal') ?? 'normal',
-        fontStyle: s?.prop('font-style', 'normal') ?? 'normal',
-        styledNode: s,
-        linkHref: child.linkHref,
-      ));
-    } else if (child.layoutType == LayoutType.inline) {
-      _collectTextRuns(child, runs);
-    }
-  }
-}
 
 // ── CSS value parsing helpers ───────────────────────────────────────
 
