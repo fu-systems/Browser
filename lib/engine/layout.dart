@@ -368,7 +368,11 @@ void _layoutInlineContent(
     }
   }
 
-  box.content.height = (cursorY - box.content.y) + lineHeight;
+  // Only set height if not explicitly specified.
+  final explicitHeight = box.styledNode?.prop('height', '') ?? '';
+  if (explicitHeight.isEmpty || explicitHeight == 'auto') {
+    box.content.height = (cursorY - box.content.y) + lineHeight;
+  }
 }
 
 double _formBoxWidth(LayoutBox box) {

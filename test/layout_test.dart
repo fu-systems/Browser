@@ -76,7 +76,8 @@ void main() {
       final root = layoutTree(styled, 800, measurer);
 
       expect(root, isNotNull);
-      expect(root.content.width, 800);
+      // Body has 8px margin on each side, so content width = 800 - 16 = 784.
+      expect(root.content.width, 784);
     });
 
     test('block elements stack vertically', () {

@@ -85,7 +85,7 @@ Map<String, String> _resolveElement(
   // Start with inherited properties.
   final props = Map<String, String>.from(inherited);
 
-  // Apply user-agent defaults.
+  // Apply user-agent defaults (override inherited values for this element).
   _applyDefaults(element, props);
 
   // Collect all matching rules with specificity.
@@ -166,83 +166,85 @@ Map<String, String> _inheritableProps(Map<String, String> props) {
 
 /// Apply default styles based on the element tag — our minimal user-agent stylesheet.
 void _applyDefaults(Element element, Map<String, String> props) {
+  // Tag-specific UA defaults override inherited values (e.g. h1 overrides
+  // the body font-size it inherited). Using direct assignment, not putIfAbsent.
   switch (element.tagName) {
     case 'h1':
-      props.putIfAbsent('font-size', () => '32px');
-      props.putIfAbsent('font-weight', () => 'bold');
-      props.putIfAbsent('margin-top', () => '21px');
-      props.putIfAbsent('margin-bottom', () => '21px');
+      props['font-size'] = '32px';
+      props['font-weight'] = 'bold';
+      props['margin-top'] = '21px';
+      props['margin-bottom'] = '21px';
     case 'h2':
-      props.putIfAbsent('font-size', () => '24px');
-      props.putIfAbsent('font-weight', () => 'bold');
-      props.putIfAbsent('margin-top', () => '19px');
-      props.putIfAbsent('margin-bottom', () => '19px');
+      props['font-size'] = '24px';
+      props['font-weight'] = 'bold';
+      props['margin-top'] = '19px';
+      props['margin-bottom'] = '19px';
     case 'h3':
-      props.putIfAbsent('font-size', () => '19px');
-      props.putIfAbsent('font-weight', () => 'bold');
-      props.putIfAbsent('margin-top', () => '18px');
-      props.putIfAbsent('margin-bottom', () => '18px');
+      props['font-size'] = '19px';
+      props['font-weight'] = 'bold';
+      props['margin-top'] = '18px';
+      props['margin-bottom'] = '18px';
     case 'h4':
-      props.putIfAbsent('font-size', () => '16px');
-      props.putIfAbsent('font-weight', () => 'bold');
-      props.putIfAbsent('margin-top', () => '21px');
-      props.putIfAbsent('margin-bottom', () => '21px');
+      props['font-size'] = '16px';
+      props['font-weight'] = 'bold';
+      props['margin-top'] = '21px';
+      props['margin-bottom'] = '21px';
     case 'h5':
-      props.putIfAbsent('font-size', () => '13px');
-      props.putIfAbsent('font-weight', () => 'bold');
-      props.putIfAbsent('margin-top', () => '22px');
-      props.putIfAbsent('margin-bottom', () => '22px');
+      props['font-size'] = '13px';
+      props['font-weight'] = 'bold';
+      props['margin-top'] = '22px';
+      props['margin-bottom'] = '22px';
     case 'h6':
-      props.putIfAbsent('font-size', () => '11px');
-      props.putIfAbsent('font-weight', () => 'bold');
-      props.putIfAbsent('margin-top', () => '25px');
-      props.putIfAbsent('margin-bottom', () => '25px');
+      props['font-size'] = '11px';
+      props['font-weight'] = 'bold';
+      props['margin-top'] = '25px';
+      props['margin-bottom'] = '25px';
     case 'p':
-      props.putIfAbsent('margin-top', () => '16px');
-      props.putIfAbsent('margin-bottom', () => '16px');
+      props['margin-top'] = '16px';
+      props['margin-bottom'] = '16px';
     case 'a':
-      props.putIfAbsent('color', () => '#0000EE');
-      props.putIfAbsent('text-decoration', () => 'underline');
-      props.putIfAbsent('cursor', () => 'pointer');
+      props['color'] = '#0000EE';
+      props['text-decoration'] = 'underline';
+      props['cursor'] = 'pointer';
     case 'strong' || 'b':
-      props.putIfAbsent('font-weight', () => 'bold');
+      props['font-weight'] = 'bold';
     case 'em' || 'i':
-      props.putIfAbsent('font-style', () => 'italic');
+      props['font-style'] = 'italic';
     case 'u':
-      props.putIfAbsent('text-decoration', () => 'underline');
+      props['text-decoration'] = 'underline';
     case 'code':
-      props.putIfAbsent('font-family', () => 'monospace');
+      props['font-family'] = 'monospace';
     case 'pre':
-      props.putIfAbsent('font-family', () => 'monospace');
-      props.putIfAbsent('white-space', () => 'pre');
-      props.putIfAbsent('margin-top', () => '16px');
-      props.putIfAbsent('margin-bottom', () => '16px');
+      props['font-family'] = 'monospace';
+      props['white-space'] = 'pre';
+      props['margin-top'] = '16px';
+      props['margin-bottom'] = '16px';
     case 'blockquote':
-      props.putIfAbsent('margin-left', () => '40px');
-      props.putIfAbsent('margin-top', () => '16px');
-      props.putIfAbsent('margin-bottom', () => '16px');
+      props['margin-left'] = '40px';
+      props['margin-top'] = '16px';
+      props['margin-bottom'] = '16px';
     case 'ul' || 'ol':
-      props.putIfAbsent('margin-top', () => '16px');
-      props.putIfAbsent('margin-bottom', () => '16px');
-      props.putIfAbsent('padding-left', () => '40px');
+      props['margin-top'] = '16px';
+      props['margin-bottom'] = '16px';
+      props['padding-left'] = '40px';
     case 'li':
-      props.putIfAbsent('display', () => 'block');
+      props['display'] = 'block';
     case 'hr':
-      props.putIfAbsent('margin-top', () => '8px');
-      props.putIfAbsent('margin-bottom', () => '8px');
-      props.putIfAbsent('border-top', () => '1px solid #808080');
+      props['margin-top'] = '8px';
+      props['margin-bottom'] = '8px';
+      props['border-top'] = '1px solid #808080';
     case 'body':
       props.putIfAbsent('font-family', () => 'serif');
       props.putIfAbsent('font-size', () => '16px');
       props.putIfAbsent('color', () => '#000000');
       props.putIfAbsent('margin', () => '8px');
     case 'table':
-      props.putIfAbsent('display', () => 'block');
-      props.putIfAbsent('border-collapse', () => 'separate');
+      props['display'] = 'block';
+      props['border-collapse'] = 'separate';
     case 'td' || 'th':
-      props.putIfAbsent('padding', () => '1px');
+      props['padding'] = '1px';
     case 'th':
-      props.putIfAbsent('font-weight', () => 'bold');
-      props.putIfAbsent('text-align', () => 'center');
+      props['font-weight'] = 'bold';
+      props['text-align'] = 'center';
   }
 }

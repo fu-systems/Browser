@@ -197,7 +197,7 @@ class HtmlParser {
     final text = _consumeWhile((c) => c != '<');
     // Collapse whitespace runs into single spaces.
     final collapsed = text.replaceAll(RegExp(r'\s+'), ' ');
-    return Text(collapsed);
+    return Text(_decodeEntities(collapsed));
   }
 
   void _parseComment() {
@@ -342,7 +342,7 @@ class HtmlParser {
     return attrs;
   }
 
-  /// Decode basic HTML entities.
+  /// Decode HTML entities (named + numeric).
   String _decodeEntities(String s) {
     return s
         .replaceAll('&amp;', '&')
@@ -351,6 +351,14 @@ class HtmlParser {
         .replaceAll('&quot;', '"')
         .replaceAll('&#39;', "'")
         .replaceAll('&apos;', "'")
-        .replaceAll('&nbsp;', '\u00A0');
+        .replaceAll('&nbsp;', '\u00A0')
+        .replaceAllMapped(RegExp(r'&#(\d+);'), (m) {
+          final code = int.tryParse(m.group(1)!);
+          return code != null ? String.fromCharCode(code) : m.group(0)!;
+        })
+        .replaceAllMapped(RegExp(r'&#x([0-9a-fA-F]+);'), (m) {
+          final code = int.tryParse(m.group(1)!, radix: 16);
+          return code != null ? String.fromCharCode(code) : m.group(0)!;
+        });
   }
 }
