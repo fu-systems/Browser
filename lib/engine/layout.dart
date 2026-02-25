@@ -120,6 +120,11 @@ LayoutBox layoutTree(
 ) {
   final rootBox = _buildLayoutTree(root, null);
   rootBox.content.width = viewportWidth;
+  // Compute root dimensions to get margin/border/padding, then position
+  // the content area inside them (no parent does this for the root box).
+  _computeBoxDimensions(rootBox, viewportWidth);
+  rootBox.content.x = rootBox.margin.left + rootBox.border.left + rootBox.padding.left;
+  rootBox.content.y = rootBox.margin.top + rootBox.border.top + rootBox.padding.top;
   _layoutBlock(rootBox, viewportWidth, measurer);
   return rootBox;
 }
@@ -206,8 +211,10 @@ void _layoutBlock(LayoutBox box, double containerWidth, TextMeasurer measurer) {
   }
 
   // If height was not set explicitly, use content height.
-  if (box.styledNode?.prop('height', '') == '') {
-    // Height is the sum of children.
+  // (styledNode is null for anonymous boxes — always auto-height.)
+  final heightProp = box.styledNode?.prop('height', '') ?? '';
+  if (heightProp.isEmpty || heightProp == 'auto') {
+    // Height is the extent of children.
     double h = 0;
     for (final child in box.children) {
       h = math.max(h, child.marginBox.y + child.marginBox.height - box.content.y);
@@ -218,7 +225,11 @@ void _layoutBlock(LayoutBox box, double containerWidth, TextMeasurer measurer) {
 
 void _computeBoxDimensions(LayoutBox box, double containerWidth) {
   final s = box.styledNode;
-  if (s == null) return;
+  if (s == null) {
+    // Anonymous box: no margins/borders/padding, fills container width.
+    box.content.width = math.max(0, containerWidth);
+    return;
+  }
 
   box.margin = _parseEdges(s, 'margin');
   box.padding = _parseEdges(s, 'padding');
@@ -253,37 +264,91 @@ void _layoutBlockChildren(
   double containerWidth,
   TextMeasurer measurer,
 ) {
+  // When a box has a mix of block and inline/text children, wrap consecutive
+  // runs of inline/text siblings in anonymous block boxes so they flow
+  // together horizontally instead of each getting its own line.
+  _ensureBlockChildren(box);
+
   double cursorY = box.content.y;
+  double prevMarginBottom = 0;
 
   for (final child in box.children) {
     try {
+      _computeBoxDimensions(child, containerWidth);
+
+      // Collapse adjacent vertical margins: use the larger of the previous
+      // sibling's bottom margin and this child's top margin.
+      final collapsed = math.max(prevMarginBottom, child.margin.top);
+
       if (child.layoutType == LayoutType.text ||
           child.layoutType == LayoutType.inline) {
-        // Wrap inline content in an anonymous block.
-        _computeBoxDimensions(child, containerWidth);
         child.content.x = box.content.x + child.margin.left + child.border.left + child.padding.left;
-        child.content.y = cursorY + child.margin.top + child.border.top + child.padding.top;
-        _layoutInlineContent(child, containerWidth, measurer);
-        cursorY = child.marginBox.y + child.marginBox.height;
+        child.content.y = cursorY + collapsed + child.border.top + child.padding.top;
+        _layoutInlineContent(child, child.content.width, measurer);
       } else {
-        // Compute dimensions to get margin/border/padding values.
-        _computeBoxDimensions(child, containerWidth);
-        // Set position BEFORE layout so children use correct parent coordinates.
+        // Block or anonymous child.
         child.content.x = box.content.x +
             child.margin.left +
             child.border.left +
             child.padding.left;
         child.content.y = cursorY +
-            child.margin.top +
+            collapsed +
             child.border.top +
             child.padding.top;
         _layoutBlock(child, containerWidth, measurer);
-        cursorY = child.marginBox.y + child.marginBox.height;
       }
+
+      // Advance cursor past content + padding + border but NOT the bottom
+      // margin — it may collapse with the next sibling's top margin.
+      cursorY = child.content.y + child.content.height +
+          child.padding.bottom + child.border.bottom;
+      prevMarginBottom = child.margin.bottom;
     } catch (_) {
       // Skip this child on error; continue laying out remaining content.
     }
   }
+}
+
+/// When [box] has a mix of block and inline/text children, wrap each
+/// consecutive run of inline/text children in an anonymous block box
+/// so they flow together as a single inline formatting context.
+void _ensureBlockChildren(LayoutBox box) {
+  if (box.children.isEmpty) return;
+
+  final hasBlock = box.children.any((c) =>
+      c.layoutType == LayoutType.block || c.layoutType == LayoutType.anonymous);
+  final hasInline = box.children.any((c) =>
+      c.layoutType == LayoutType.inline || c.layoutType == LayoutType.text);
+
+  if (!hasBlock || !hasInline) return; // All same type — nothing to do.
+
+  final newChildren = <LayoutBox>[];
+  List<LayoutBox>? inlineRun;
+
+  for (final child in box.children) {
+    if (child.layoutType == LayoutType.block ||
+        child.layoutType == LayoutType.anonymous) {
+      if (inlineRun != null) {
+        final anon = LayoutBox(LayoutType.anonymous);
+        anon.children.addAll(inlineRun);
+        newChildren.add(anon);
+        inlineRun = null;
+      }
+      newChildren.add(child);
+    } else {
+      inlineRun ??= [];
+      inlineRun.add(child);
+    }
+  }
+
+  if (inlineRun != null) {
+    final anon = LayoutBox(LayoutType.anonymous);
+    anon.children.addAll(inlineRun);
+    newChildren.add(anon);
+  }
+
+  box.children.clear();
+  box.children.addAll(newChildren);
 }
 
 // ── Inline layout ───────────────────────────────────────────────────
