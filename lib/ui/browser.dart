@@ -14,6 +14,7 @@ import '../engine/css.dart';
 import '../engine/style.dart';
 import '../engine/layout.dart' as engine;
 import '../network/fetcher.dart';
+import '../network/logger.dart';
 import 'flutter_text_measurer.dart';
 import 'page_painter.dart';
 import 'tab.dart' as tab_model;
@@ -57,6 +58,12 @@ class _BrowserShellState extends State<BrowserShell> {
   }
 
   // ── Navigation ──────────────────────────────────────────────────
+
+  @override
+  void initState() {
+    super.initState();
+    PaneLogger.info('Pane browser started — log file: ${PaneLogger.logPath}');
+  }
 
   Future<void> _navigate(String input) async {
     if (input.trim().isEmpty) return;
@@ -108,7 +115,9 @@ class _BrowserShellState extends State<BrowserShell> {
           if (cssResponse.isOk) {
             stylesheets.add(CssParser.parse(cssResponse.body));
           }
-        } catch (_) {}
+        } catch (e) {
+          PaneLogger.warn('loadPage($url)', 'Failed to fetch stylesheet $href: $e');
+        }
       }
 
       // 4. Compute styles.
@@ -131,7 +140,8 @@ class _BrowserShellState extends State<BrowserShell> {
 
       // 7. Fetch images in background.
       _fetchImages(layoutRoot, response.url);
-    } catch (e) {
+    } catch (e, stack) {
+      PaneLogger.error('loadPage($url)', e, stack);
       setState(() {
         _activeTab.isLoading = false;
         _activeTab.errorMessage = e.toString();
@@ -172,7 +182,9 @@ class _BrowserShellState extends State<BrowserShell> {
             });
           }
         }
-      } catch (_) {}
+      } catch (e) {
+        PaneLogger.warn('fetchImages', 'Failed to load image $resolvedUrl: $e');
+      }
     }
   }
 
@@ -1005,6 +1017,11 @@ class _BrowserShellState extends State<BrowserShell> {
             TextButton(
               onPressed: _reload,
               child: const Text('Try again'),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Log: ${PaneLogger.logPath}',
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
             ),
           ],
         ),

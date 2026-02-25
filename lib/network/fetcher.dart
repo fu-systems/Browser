@@ -6,6 +6,7 @@
 import 'dart:io';
 import 'dart:convert';
 import 'dart:typed_data';
+import '../network/logger.dart';
 
 class FetchResponse {
   final int statusCode;
@@ -43,6 +44,9 @@ class Fetcher {
       // Strip default headers — minimal footprint.
       request.headers.removeAll('cookie');
       request.headers.removeAll('referer');
+      // Set Accept-Language so servers don't get null and fail.
+      request.headers.set('Accept-Language', 'en-US,en;q=0.9');
+      request.headers.set('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8');
 
       // Disable auto-redirect so we can handle it manually.
       request.followRedirects = false;
@@ -71,7 +75,8 @@ class Fetcher {
               ? Encoding.getByName(charset)!.decoder
               : utf8.decoder,
         ).join();
-      } catch (_) {
+      } catch (e) {
+        PaneLogger.warn('fetch', 'Charset "$charset" decode failed for $currentUrl, falling back to UTF-8: $e');
         body = await response.transform(utf8.decoder).join();
       }
 
@@ -89,6 +94,7 @@ class Fetcher {
       );
     }
 
+    PaneLogger.warn('fetch', 'Too many redirects for $currentUrl');
     return FetchResponse(
       statusCode: 0,
       body: 'Too many redirects',
@@ -107,6 +113,7 @@ class Fetcher {
       final request = await _client.getUrl(uri);
       request.headers.removeAll('cookie');
       request.headers.removeAll('referer');
+      request.headers.set('Accept-Language', 'en-US,en;q=0.9');
       request.followRedirects = false;
 
       final response = await request.close();
@@ -121,6 +128,7 @@ class Fetcher {
       }
 
       if (statusCode < 200 || statusCode >= 300) {
+        PaneLogger.warn('fetchBytes', 'HTTP $statusCode for $currentUrl');
         await response.drain();
         return null;
       }
