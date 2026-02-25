@@ -70,9 +70,12 @@ class FlutterTextMeasurer implements TextMeasurer {
       lines.add(TextLine(text, painter.width, painter.height, fontSize));
     }
 
+    // Capture dimensions before disposing — accessing after dispose crashes.
+    final totalWidth = painter.width;
+    final totalHeight = painter.height;
     painter.dispose();
 
-    return TextMetrics(painter.width, painter.height, lines);
+    return TextMetrics(totalWidth, totalHeight, lines);
   }
 
   String _mapFontFamily(String family) {
