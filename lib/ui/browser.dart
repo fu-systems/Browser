@@ -15,12 +15,16 @@ import '../engine/style.dart';
 import '../engine/layout.dart' as engine;
 import '../network/fetcher.dart';
 import '../network/logger.dart';
+import '../plugin/plugin.dart';
+import '../plugin/plugin_pipeline.dart';
 import 'flutter_text_measurer.dart';
 import 'page_painter.dart';
 import 'tab.dart' as tab_model;
 
 class BrowserShell extends StatefulWidget {
-  const BrowserShell({super.key});
+  final PluginPipeline? pluginPipeline;
+
+  const BrowserShell({super.key, this.pluginPipeline});
 
   @override
   State<BrowserShell> createState() => _BrowserShellState();
@@ -73,6 +77,14 @@ class _BrowserShellState extends State<BrowserShell> {
       url = 'https://$url';
     }
 
+    // Plugin hook: onNavigate — may modify or cancel.
+    final pipeline = widget.pluginPipeline;
+    if (pipeline != null) {
+      final result = pipeline.runNavigate(url);
+      if (result == null) return; // cancelled by plugin
+      url = result;
+    }
+
     _activeTab.navigateTo(url);
     _addressController.text = url;
 
@@ -86,21 +98,64 @@ class _BrowserShellState extends State<BrowserShell> {
       _showSource = false;
     });
 
+    final pipeline = widget.pluginPipeline;
+
     try {
-      // 1. Fetch the HTML.
-      final response = await Fetcher.fetch(url);
+      // 1. Build a FetchRequest and run onBeforeRequest hooks.
+      FetchResponse response;
+      if (pipeline != null) {
+        var request = FetchRequest(
+          url: url,
+          headers: {
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept':
+                'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          },
+        );
+        final modified = pipeline.runBeforeRequest(request);
+        if (modified == null) {
+          setState(() => _activeTab.isLoading = false);
+          return; // request cancelled by plugin
+        }
+        response = await Fetcher.fetchWithHeaders(
+          modified.url,
+          modified.headers,
+        );
+      } else {
+        response = await Fetcher.fetch(url);
+      }
+
       if (!response.isOk) {
         throw Exception('HTTP ${response.statusCode}');
       }
 
-      _activeTab.url = response.url;
-      _addressController.text = response.url;
-      _activeTab.sourceHtml = response.body;
+      // 2. Run onAfterResponse hooks.
+      String htmlBody = response.body;
+      String resolvedUrl = response.url;
+      if (pipeline != null) {
+        var responseData = FetchResponseData(
+          statusCode: response.statusCode,
+          body: response.body,
+          headers: response.headers,
+          url: response.url,
+          contentType: response.contentType,
+        );
+        responseData = pipeline.runAfterResponse(responseData);
+        htmlBody = responseData.body;
+        resolvedUrl = responseData.url;
+      }
 
-      // 2. Parse HTML → DOM.
-      final document = HtmlParser.parse(response.body);
+      _activeTab.url = resolvedUrl;
+      _addressController.text = resolvedUrl;
+      _activeTab.sourceHtml = htmlBody;
 
-      // 3. Extract and parse CSS.
+      // 3. Parse HTML → DOM.
+      final document = HtmlParser.parse(htmlBody);
+
+      // 4. Run onDomReady hooks (plugins can inject/remove DOM nodes).
+      pipeline?.runDomReady(document);
+
+      // 5. Extract and parse CSS.
       final stylesheets = <css.Stylesheet>[];
 
       final internalCss = document.internalCSS;
@@ -110,7 +165,7 @@ class _BrowserShellState extends State<BrowserShell> {
 
       for (final href in document.externalStylesheetUrls) {
         try {
-          final cssUrl = Fetcher.resolveUrl(response.url, href);
+          final cssUrl = Fetcher.resolveUrl(resolvedUrl, href);
           final cssResponse = await Fetcher.fetch(cssUrl);
           if (cssResponse.isOk) {
             stylesheets.add(css.CssParser.parse(cssResponse.body));
@@ -120,15 +175,25 @@ class _BrowserShellState extends State<BrowserShell> {
         }
       }
 
-      // 4. Compute styles.
+      // 6. Compute styles.
       final body = document.body ?? document.documentElement ?? document;
-      final styledTree = computeStyles(body, stylesheets);
+      var styledTree = computeStyles(body, stylesheets);
 
-      // 5. Layout.
+      // 7. Run onStylesComputed hooks.
+      if (pipeline != null) {
+        styledTree = pipeline.runStylesComputed(styledTree, stylesheets);
+      }
+
+      // 8. Layout.
       final viewportWidth = _viewportWidth;
-      final layoutRoot = engine.layoutTree(styledTree, viewportWidth, _textMeasurer);
+      var layoutRoot = engine.layoutTree(styledTree, viewportWidth, _textMeasurer);
 
-      // 6. Update tab state.
+      // 9. Run onLayoutComplete hooks.
+      if (pipeline != null) {
+        layoutRoot = pipeline.runLayoutComplete(layoutRoot);
+      }
+
+      // 10. Update tab state.
       setState(() {
         _activeTab.title = document.title.isNotEmpty
             ? document.title
@@ -138,8 +203,8 @@ class _BrowserShellState extends State<BrowserShell> {
         _activeTab.isLoading = false;
       });
 
-      // 7. Fetch images in background.
-      _fetchImages(layoutRoot, response.url);
+      // 11. Fetch images in background.
+      _fetchImages(layoutRoot, resolvedUrl);
     } catch (e, stack) {
       PaneLogger.error('loadPage($url)', e, stack);
       setState(() {
@@ -225,6 +290,14 @@ class _BrowserShellState extends State<BrowserShell> {
   }
 
   void _onLinkTap(String href) {
+    // Plugin hook: onLinkClick — may modify or cancel.
+    final pipeline = widget.pluginPipeline;
+    if (pipeline != null) {
+      final result = pipeline.runLinkClick(href, _activeTab.url);
+      if (result == null) return; // cancelled by plugin
+      href = result;
+    }
+
     final resolved = Fetcher.resolveUrl(_activeTab.url, href);
     _navigate(resolved);
   }
@@ -832,6 +905,7 @@ class _BrowserShellState extends State<BrowserShell> {
                           searchQuery: _activeTab.searchQuery,
                           currentSearchIndex: _activeTab.searchIndex,
                           searchRects: _activeTab.searchRects,
+                          pluginPipeline: widget.pluginPipeline,
                         ),
                         size: Size.infinite,
                       ),

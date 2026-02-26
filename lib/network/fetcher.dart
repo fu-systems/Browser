@@ -103,6 +103,78 @@ class Fetcher {
     );
   }
 
+  /// Fetch a URL with custom request headers (used by the plugin pipeline).
+  /// Same redirect/decode logic as [fetch], but headers come from the caller
+  /// instead of being hardcoded.
+  static Future<FetchResponse> fetchWithHeaders(
+    String url,
+    Map<String, String> headers,
+  ) async {
+    var currentUrl = url;
+    const maxRedirects = 5;
+
+    for (int i = 0; i < maxRedirects; i++) {
+      final uri = Uri.parse(currentUrl);
+
+      final request = await _client.getUrl(uri);
+      // Clear defaults, then apply caller-supplied headers.
+      request.headers.removeAll('cookie');
+      request.headers.removeAll('referer');
+      for (final entry in headers.entries) {
+        request.headers.set(entry.key, entry.value);
+      }
+
+      request.followRedirects = false;
+
+      final response = await request.close();
+      final statusCode = response.statusCode;
+
+      if (statusCode >= 300 && statusCode < 400) {
+        final location = response.headers.value('location');
+        if (location == null) break;
+        currentUrl = uri.resolve(location).toString();
+        await response.drain();
+        continue;
+      }
+
+      final contentType = response.headers.contentType;
+      final charset = contentType?.charset ?? 'utf-8';
+
+      String body;
+      try {
+        body = await response.transform(
+          Encoding.getByName(charset) != null
+              ? Encoding.getByName(charset)!.decoder
+              : utf8.decoder,
+        ).join();
+      } catch (e) {
+        PaneLogger.warn('fetchWithHeaders', 'Charset "$charset" decode failed for $currentUrl, falling back to UTF-8: $e');
+        body = await response.transform(utf8.decoder).join();
+      }
+
+      final responseHeaders = <String, String>{};
+      response.headers.forEach((name, values) {
+        responseHeaders[name] = values.join(', ');
+      });
+
+      return FetchResponse(
+        statusCode: statusCode,
+        body: body,
+        headers: responseHeaders,
+        url: currentUrl,
+        contentType: contentType?.mimeType,
+      );
+    }
+
+    PaneLogger.warn('fetchWithHeaders', 'Too many redirects for $currentUrl');
+    return FetchResponse(
+      statusCode: 0,
+      body: 'Too many redirects',
+      headers: {},
+      url: currentUrl,
+    );
+  }
+
   /// Fetch raw bytes from a URL (for images). Follows redirects.
   static Future<Uint8List?> fetchBytes(String url) async {
     var currentUrl = url;

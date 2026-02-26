@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import '../engine/layout.dart' as engine;
 import '../engine/style.dart';
 import '../engine/dom.dart' as dom;
+import '../plugin/plugin_pipeline.dart';
 
 class PagePainter extends CustomPainter {
   final engine.LayoutBox? rootBox;
@@ -19,6 +20,7 @@ class PagePainter extends CustomPainter {
   final String searchQuery;
   final int currentSearchIndex;
   final List<engine.Rect> searchRects;
+  final PluginPipeline? pluginPipeline;
 
   PagePainter({
     this.rootBox,
@@ -27,6 +29,7 @@ class PagePainter extends CustomPainter {
     this.searchQuery = '',
     this.currentSearchIndex = -1,
     this.searchRects = const [],
+    this.pluginPipeline,
   });
 
   @override
@@ -52,6 +55,9 @@ class PagePainter extends CustomPainter {
         );
       }
     }
+
+    // Plugin paint overlays.
+    pluginPipeline?.runPaint(canvas, size, scrollOffset);
 
     canvas.restore();
   }
