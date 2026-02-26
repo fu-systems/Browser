@@ -13,6 +13,9 @@ linux/flutter/ephemeral/
 windows/flutter/ephemeral/
 macos/Flutter/ephemeral/
 
+# Build staging
+dist/
+
 # Misc
 *.swp
 *.swo
