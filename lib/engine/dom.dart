@@ -1,7 +1,7 @@
 /// DOM tree representation — pure Dart, no Flutter dependency.
 ///
-/// Models the subset of the DOM that Pane needs for Phase 1:
-/// Document, Element, and Text nodes.
+/// Models the DOM needed by Pane: Document, Element, Text, and Comment nodes.
+/// Includes sibling/index helpers required by CSS selector matching.
 
 enum NodeType { document, element, text, comment }
 
@@ -33,6 +33,22 @@ class Node {
   /// Convenience: all Element descendants.
   Iterable<Element> get elementDescendants =>
       descendants.whereType<Element>();
+
+  /// Previous sibling node.
+  Node? get previousSibling {
+    if (parent == null) return null;
+    final siblings = parent!.children;
+    final idx = siblings.indexOf(this);
+    return idx > 0 ? siblings[idx - 1] : null;
+  }
+
+  /// Next sibling node.
+  Node? get nextSibling {
+    if (parent == null) return null;
+    final siblings = parent!.children;
+    final idx = siblings.indexOf(this);
+    return idx >= 0 && idx < siblings.length - 1 ? siblings[idx + 1] : null;
+  }
 }
 
 class Document extends Node {
@@ -117,6 +133,67 @@ class Element extends Node {
     }
     return buf.toString();
   }
+
+  // ── Sibling / index helpers for CSS selectors ──
+
+  /// All Element siblings of this element (including self).
+  List<Element> get _elementSiblings {
+    if (parent == null) return [this];
+    return parent!.children.whereType<Element>().toList();
+  }
+
+  /// 1-based index among element siblings.
+  int get elementIndex {
+    final sibs = _elementSiblings;
+    return sibs.indexOf(this) + 1;
+  }
+
+  /// 1-based index counting from the end.
+  int get elementIndexFromEnd {
+    final sibs = _elementSiblings;
+    return sibs.length - sibs.indexOf(this);
+  }
+
+  /// 1-based index among element siblings of the same tag name.
+  int get elementIndexOfType {
+    final sibs = _elementSiblings.where((e) => e.tagName == tagName).toList();
+    return sibs.indexOf(this) + 1;
+  }
+
+  /// 1-based index from end among element siblings of the same tag name.
+  int get elementIndexOfTypeFromEnd {
+    final sibs = _elementSiblings.where((e) => e.tagName == tagName).toList();
+    return sibs.length - sibs.indexOf(this);
+  }
+
+  /// Whether this element is the only Element child of its parent.
+  bool get isOnlyChild => _elementSiblings.length == 1;
+
+  /// Whether this is the only child of its type among siblings.
+  bool get isOnlyOfType =>
+      _elementSiblings.where((e) => e.tagName == tagName).length == 1;
+
+  /// Previous Element sibling (skipping text/comment nodes).
+  Element? get previousElementSibling {
+    if (parent == null) return null;
+    final sibs = _elementSiblings;
+    final idx = sibs.indexOf(this);
+    return idx > 0 ? sibs[idx - 1] : null;
+  }
+
+  /// Next Element sibling (skipping text/comment nodes).
+  Element? get nextElementSibling {
+    if (parent == null) return null;
+    final sibs = _elementSiblings;
+    final idx = sibs.indexOf(this);
+    return idx >= 0 && idx < sibs.length - 1 ? sibs[idx + 1] : null;
+  }
+
+  /// Whether this element has any child text content (non-whitespace).
+  bool get hasTextContent => textContent.trim().isNotEmpty;
+
+  /// Whether this element has no children at all.
+  bool get isEmpty => children.isEmpty;
 
   @override
   String toString() => '<$tagName>';
