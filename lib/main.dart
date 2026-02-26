@@ -5,6 +5,7 @@ import 'plugin/plugin_pipeline.dart';
 import 'plugin/plugin_registry.dart';
 import 'plugin/built_in/cookie_manager.dart';
 import 'plugin/built_in/dark_mode.dart';
+import 'plugin/built_in/identity_manager.dart';
 import 'plugin/built_in/privacy_shield.dart';
 import 'ui/browser.dart';
 
@@ -50,12 +51,27 @@ void main() {
   // Cookie manager is always enabled — gated by the per-tab toggle.
   registry.enable('cookie_manager');
 
+  final identityManager = IdentityManagerPlugin();
+  registry.register(
+    identityManager,
+    const PluginManifest(
+      name: 'identity_manager',
+      version: '1.0.0',
+      description: 'Browser fingerprint spoofing with editable profiles.',
+      author: 'Pane',
+      capabilities: {PluginCapability.network, PluginCapability.headers},
+    ),
+  );
+  // Identity manager is always enabled — controlled via profile selection.
+  registry.enable('identity_manager');
+
   final pipeline = PluginPipeline(registry, context);
 
   runApp(PaneApp(
     pipeline: pipeline,
     registry: registry,
     cookieManager: cookieManager,
+    identityManager: identityManager,
   ));
 }
 
@@ -63,12 +79,14 @@ class PaneApp extends StatelessWidget {
   final PluginPipeline pipeline;
   final PluginRegistry registry;
   final CookieManagerPlugin cookieManager;
+  final IdentityManagerPlugin identityManager;
 
   const PaneApp({
     super.key,
     required this.pipeline,
     required this.registry,
     required this.cookieManager,
+    required this.identityManager,
   });
 
   @override
@@ -86,6 +104,7 @@ class PaneApp extends StatelessWidget {
       home: BrowserShell(
         pluginPipeline: pipeline,
         cookieManager: cookieManager,
+        identityManager: identityManager,
       ),
     );
   }

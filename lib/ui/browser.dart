@@ -18,15 +18,23 @@ import '../network/logger.dart';
 import '../plugin/plugin.dart';
 import '../plugin/plugin_pipeline.dart';
 import '../plugin/built_in/cookie_manager.dart';
+import '../plugin/built_in/identity_manager.dart';
 import 'flutter_text_measurer.dart';
+import 'identity_editor.dart';
 import 'page_painter.dart';
 import 'tab.dart' as tab_model;
 
 class BrowserShell extends StatefulWidget {
   final PluginPipeline? pluginPipeline;
   final CookieManagerPlugin? cookieManager;
+  final IdentityManagerPlugin? identityManager;
 
-  const BrowserShell({super.key, this.pluginPipeline, this.cookieManager});
+  const BrowserShell({
+    super.key,
+    this.pluginPipeline,
+    this.cookieManager,
+    this.identityManager,
+  });
 
   @override
   State<BrowserShell> createState() => _BrowserShellState();
@@ -789,11 +797,84 @@ class _BrowserShellState extends State<BrowserShell> {
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(maxWidth: 36),
           ),
+          if (widget.identityManager != null) ...[
+            const SizedBox(width: 2),
+            _buildIdentityButton(),
+          ],
           if (widget.cookieManager != null) ...[
             const SizedBox(width: 2),
             _buildCookieToggle(),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildIdentityButton() {
+    final mgr = widget.identityManager!;
+    final isActive = mgr.activeProfile.fields.isNotEmpty;
+    final profileName = mgr.activeProfile.name;
+
+    return GestureDetector(
+      onTap: () {
+        showIdentityEditor(context, mgr, onChanged: () {
+          setState(() {});
+        });
+      },
+      child: Tooltip(
+        message: isActive
+            ? 'Identity: $profileName — click to edit'
+            : 'Identity: None — click to configure',
+        child: Container(
+          height: 26,
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          decoration: BoxDecoration(
+            color: isActive
+                ? const Color(0xFFE3F2FD)
+                : const Color(0xFFF5F5F5),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(
+              color: isActive
+                  ? const Color(0xFF42A5F5)
+                  : Colors.grey.shade400,
+              width: 0.5,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.fingerprint,
+                size: 16,
+                color: isActive
+                    ? const Color(0xFF1565C0)
+                    : Colors.grey.shade600,
+              ),
+              const SizedBox(width: 3),
+              Text(
+                isActive ? 'ID' : 'ID',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: isActive
+                      ? const Color(0xFF1565C0)
+                      : Colors.grey.shade600,
+                ),
+              ),
+              if (isActive) ...[
+                const SizedBox(width: 2),
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF42A5F5),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
