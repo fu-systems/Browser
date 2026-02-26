@@ -10,7 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../engine/html_parser.dart';
-import '../engine/css.dart';
+import '../engine/css.dart' as css;
 import '../engine/style.dart';
 import '../engine/layout.dart' as engine;
 import '../network/fetcher.dart';
@@ -101,11 +101,11 @@ class _BrowserShellState extends State<BrowserShell> {
       final document = HtmlParser.parse(response.body);
 
       // 3. Extract and parse CSS.
-      final stylesheets = <Stylesheet>[];
+      final stylesheets = <css.Stylesheet>[];
 
       final internalCss = document.internalCSS;
       if (internalCss.isNotEmpty) {
-        stylesheets.add(CssParser.parse(internalCss));
+        stylesheets.add(css.CssParser.parse(internalCss));
       }
 
       for (final href in document.externalStylesheetUrls) {
@@ -113,7 +113,7 @@ class _BrowserShellState extends State<BrowserShell> {
           final cssUrl = Fetcher.resolveUrl(response.url, href);
           final cssResponse = await Fetcher.fetch(cssUrl);
           if (cssResponse.isOk) {
-            stylesheets.add(CssParser.parse(cssResponse.body));
+            stylesheets.add(css.CssParser.parse(cssResponse.body));
           }
         } catch (e) {
           PaneLogger.warn('loadPage($url)', 'Failed to fetch stylesheet $href: $e');

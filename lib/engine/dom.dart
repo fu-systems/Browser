@@ -137,46 +137,46 @@ class Element extends Node {
   // ── Sibling / index helpers for CSS selectors ──
 
   /// All Element siblings of this element (including self).
-  List<Element> get _elementSiblings {
+  List<Element> get elementSiblings {
     if (parent == null) return [this];
     return parent!.children.whereType<Element>().toList();
   }
 
   /// 1-based index among element siblings.
   int get elementIndex {
-    final sibs = _elementSiblings;
+    final sibs = elementSiblings;
     return sibs.indexOf(this) + 1;
   }
 
   /// 1-based index counting from the end.
   int get elementIndexFromEnd {
-    final sibs = _elementSiblings;
+    final sibs = elementSiblings;
     return sibs.length - sibs.indexOf(this);
   }
 
   /// 1-based index among element siblings of the same tag name.
   int get elementIndexOfType {
-    final sibs = _elementSiblings.where((e) => e.tagName == tagName).toList();
+    final sibs = elementSiblings.where((e) => e.tagName == tagName).toList();
     return sibs.indexOf(this) + 1;
   }
 
   /// 1-based index from end among element siblings of the same tag name.
   int get elementIndexOfTypeFromEnd {
-    final sibs = _elementSiblings.where((e) => e.tagName == tagName).toList();
+    final sibs = elementSiblings.where((e) => e.tagName == tagName).toList();
     return sibs.length - sibs.indexOf(this);
   }
 
   /// Whether this element is the only Element child of its parent.
-  bool get isOnlyChild => _elementSiblings.length == 1;
+  bool get isOnlyChild => elementSiblings.length == 1;
 
   /// Whether this is the only child of its type among siblings.
   bool get isOnlyOfType =>
-      _elementSiblings.where((e) => e.tagName == tagName).length == 1;
+      elementSiblings.where((e) => e.tagName == tagName).length == 1;
 
   /// Previous Element sibling (skipping text/comment nodes).
   Element? get previousElementSibling {
     if (parent == null) return null;
-    final sibs = _elementSiblings;
+    final sibs = elementSiblings;
     final idx = sibs.indexOf(this);
     return idx > 0 ? sibs[idx - 1] : null;
   }
@@ -184,7 +184,7 @@ class Element extends Node {
   /// Next Element sibling (skipping text/comment nodes).
   Element? get nextElementSibling {
     if (parent == null) return null;
-    final sibs = _elementSiblings;
+    final sibs = elementSiblings;
     final idx = sibs.indexOf(this);
     return idx >= 0 && idx < sibs.length - 1 ? sibs[idx + 1] : null;
   }

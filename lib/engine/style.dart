@@ -1,8 +1,8 @@
 /// Style resolution — pure Dart, no Flutter dependency.
 ///
-/// Matches CSS selectors to DOM elements, computes specificity,
-/// cascades declarations, and produces a StyledNode tree with
-/// resolved property values.
+/// Matches CSS Selectors Level 4 to DOM elements, computes specificity,
+/// cascades declarations with !important support, and produces a
+/// StyledNode tree with resolved property values.
 
 import 'dom.dart';
 import 'css.dart';
@@ -28,6 +28,8 @@ class StyledNode {
     if (d == 'inline') return Display.inline;
     if (d == 'block') return Display.block;
     if (d == 'inline-block') return Display.inlineBlock;
+    if (d == 'flex') return Display.flex;
+    if (d == 'inline-flex') return Display.inlineFlex;
     // Default: block for block elements, inline otherwise.
     if (node is Element) {
       return blockElements.contains((node as Element).tagName)
@@ -38,7 +40,7 @@ class StyledNode {
   }
 }
 
-enum Display { block, inline, inlineBlock, none }
+enum Display { block, inline, inlineBlock, none, flex, inlineFlex }
 
 // ── Style computation ───────────────────────────────────────────────
 
@@ -74,9 +76,10 @@ StyledNode _styleNode(
 
 /// Resolve all properties for an Element by cascading:
 /// 1. User-agent defaults
-/// 2. Stylesheet rules (ordered by specificity)
-/// 3. Inline styles (highest specificity)
-/// 4. Inherited properties from parent
+/// 2. Stylesheet rules (ordered by specificity), normal declarations
+/// 3. Inline styles (highest specificity for normal)
+/// 4. !important declarations (override everything except inline !important)
+/// 5. Inherited properties from parent
 Map<String, String> _resolveElement(
   Element element,
   List<Stylesheet> stylesheets,
@@ -89,7 +92,7 @@ Map<String, String> _resolveElement(
   _applyDefaults(element, props);
 
   // Collect all matching rules with specificity.
-  final matches = <(Specificity, Map<String, String>)>[];
+  final matches = <(Specificity, Map<String, CssValue>)>[];
 
   for (final sheet in stylesheets) {
     for (final rule in sheet.rules) {
@@ -101,40 +104,315 @@ Map<String, String> _resolveElement(
 
   // Sort by specificity (ascending), then apply in order.
   matches.sort((a, b) => a.$1.compareTo(b.$1));
+
+  // First pass: apply normal (non-important) declarations.
   for (final (_, decls) in matches) {
-    props.addAll(decls);
+    for (final entry in decls.entries) {
+      if (!entry.value.important) {
+        props[entry.key] = entry.value.value;
+      }
+    }
   }
 
-  // Apply inline styles (highest specificity).
+  // Apply inline styles (highest specificity for normal declarations).
   if (element.inlineStyle.isNotEmpty) {
-    props.addAll(CssParser.parseInlineStyle(element.inlineStyle));
+    final inlineDecls = CssParser.parseInlineStyle(element.inlineStyle);
+    for (final entry in inlineDecls.entries) {
+      if (!entry.value.important) {
+        props[entry.key] = entry.value.value;
+      }
+    }
   }
+
+  // Second pass: apply !important declarations (override everything).
+  for (final (_, decls) in matches) {
+    for (final entry in decls.entries) {
+      if (entry.value.important) {
+        props[entry.key] = entry.value.value;
+      }
+    }
+  }
+
+  // Inline !important overrides even stylesheet !important.
+  if (element.inlineStyle.isNotEmpty) {
+    final inlineDecls = CssParser.parseInlineStyle(element.inlineStyle);
+    for (final entry in inlineDecls.entries) {
+      if (entry.value.important) {
+        props[entry.key] = entry.value.value;
+      }
+    }
+  }
+
+  // Handle CSS-wide keywords: inherit, initial, unset.
+  _resolveKeywords(props, inherited);
 
   return props;
 }
 
+/// Handle inherit/initial/unset keywords.
+void _resolveKeywords(Map<String, String> props, Map<String, String> inherited) {
+  final keys = props.keys.toList();
+  for (final key in keys) {
+    final val = props[key];
+    if (val == 'inherit') {
+      if (inherited.containsKey(key)) {
+        props[key] = inherited[key]!;
+      } else {
+        props.remove(key);
+      }
+    } else if (val == 'initial') {
+      props.remove(key); // Revert to browser default (no value).
+    } else if (val == 'unset') {
+      if (_inheritableProperties.contains(key)) {
+        // Inheritable: acts like inherit.
+        if (inherited.containsKey(key)) {
+          props[key] = inherited[key]!;
+        } else {
+          props.remove(key);
+        }
+      } else {
+        // Non-inheritable: acts like initial.
+        props.remove(key);
+      }
+    }
+  }
+}
+
+// ── Selector matching (CSS Selectors Level 4) ───────────────────────
+
 /// Check if [selector] matches [element].
 bool _selectorMatches(Element element, Selector selector) {
-  // Check the simple part (tag, id, classes).
-  if (selector.tag != null && selector.tag != element.tagName) return false;
-  if (selector.id != null && selector.id != element.id) return false;
-  for (final cls in selector.classes) {
-    if (!element.classes.contains(cls)) return false;
-  }
+  if (selector.compounds.isEmpty) return false;
 
-  // Check ancestor (descendant combinator).
-  if (selector.ancestor != null) {
-    Node? parent = element.parent;
-    while (parent != null) {
-      if (parent is Element && _selectorMatches(parent, selector.ancestor!)) {
-        return true;
-      }
-      parent = parent.parent;
+  // compounds[0] is the subject (rightmost), compounds[1..n] are ancestors/siblings.
+  // combinators[0] connects compounds[0] to compounds[1], etc.
+  if (!_compoundMatches(element, selector.compounds[0])) return false;
+
+  // Walk the combinator chain.
+  Element? current = element;
+  for (int i = 0; i < selector.combinators.length; i++) {
+    if (current == null) return false;
+    final combinator = selector.combinators[i];
+    final compound = selector.compounds[i + 1];
+
+    switch (combinator) {
+      case Combinator.descendant:
+        // Any ancestor must match.
+        Node? ancestor = current.parent;
+        bool found = false;
+        while (ancestor != null) {
+          if (ancestor is Element && _compoundMatches(ancestor, compound)) {
+            current = ancestor;
+            found = true;
+            break;
+          }
+          ancestor = ancestor.parent;
+        }
+        if (!found) return false;
+
+      case Combinator.child:
+        // Direct parent must match.
+        final parent = current.parent;
+        if (parent is! Element || !_compoundMatches(parent, compound)) return false;
+        current = parent;
+
+      case Combinator.adjacentSibling:
+        // Previous element sibling must match.
+        final prev = current.previousElementSibling;
+        if (prev == null || !_compoundMatches(prev, compound)) return false;
+        current = prev;
+
+      case Combinator.generalSibling:
+        // Any preceding element sibling must match.
+        final siblings = current.elementSiblings;
+        final idx = siblings.indexOf(current);
+        bool found = false;
+        for (int j = idx - 1; j >= 0; j--) {
+          if (_compoundMatches(siblings[j], compound)) {
+            current = siblings[j];
+            found = true;
+            break;
+          }
+        }
+        if (!found) return false;
     }
-    return false; // No ancestor matched.
   }
 
   return true;
+}
+
+/// Check if a compound selector matches an element.
+bool _compoundMatches(Element element, CompoundSelector compound) {
+  // Tag check.
+  if (compound.tag != null && compound.tag != element.tagName) return false;
+
+  // ID check.
+  if (compound.id != null && compound.id != element.id) return false;
+
+  // Class checks.
+  for (final cls in compound.classes) {
+    if (!element.classes.contains(cls)) return false;
+  }
+
+  // Attribute checks.
+  for (final attr in compound.attributes) {
+    if (!_attributeMatches(element, attr)) return false;
+  }
+
+  // Pseudo-class checks.
+  for (final pseudo in compound.pseudoClasses) {
+    if (!_pseudoClassMatches(element, pseudo)) return false;
+  }
+
+  return true;
+}
+
+/// Check if an attribute selector matches.
+bool _attributeMatches(Element element, AttributeSelector attr) {
+  final value = element.attributes[attr.name];
+
+  if (attr.op == null) {
+    // [attr] — just check presence.
+    return element.attributes.containsKey(attr.name);
+  }
+
+  if (value == null) return false;
+
+  String v = value;
+  String? target = attr.value;
+  if (attr.caseInsensitive && target != null) {
+    v = v.toLowerCase();
+    target = target.toLowerCase();
+  }
+
+  switch (attr.op) {
+    case '=':
+      return v == target;
+    case '~=':
+      return v.split(RegExp(r'\s+')).contains(target);
+    case '|=':
+      return v == target || v.startsWith('${target!}-');
+    case '^=':
+      return target != null && v.startsWith(target);
+    case '\$=':
+      return target != null && v.endsWith(target);
+    case '*=':
+      return target != null && v.contains(target);
+    default:
+      return false;
+  }
+}
+
+/// Check if a pseudo-class matches.
+bool _pseudoClassMatches(Element element, PseudoSelector pseudo) {
+  switch (pseudo.name) {
+    case 'first-child':
+      return element.elementIndex == 1;
+    case 'last-child':
+      return element.elementIndexFromEnd == 1;
+    case 'first-of-type':
+      return element.elementIndexOfType == 1;
+    case 'last-of-type':
+      return element.elementIndexOfTypeFromEnd == 1;
+    case 'only-child':
+      return element.isOnlyChild;
+    case 'only-of-type':
+      return element.isOnlyOfType;
+    case 'empty':
+      return element.isEmpty;
+    case 'root':
+      return element.parent is Document;
+    case 'link':
+      return element.tagName == 'a' && element.attributes.containsKey('href');
+    case 'visited':
+      return false; // We don't track visited links.
+    case 'hover':
+    case 'active':
+    case 'focus':
+    case 'focus-within':
+    case 'focus-visible':
+      return false; // Dynamic states — not matched during initial styling.
+    case 'enabled':
+      return !element.attributes.containsKey('disabled');
+    case 'disabled':
+      return element.attributes.containsKey('disabled');
+    case 'checked':
+      return element.attributes.containsKey('checked');
+    case 'required':
+      return element.attributes.containsKey('required');
+    case 'optional':
+      return !element.attributes.containsKey('required');
+    case 'read-only':
+      return element.attributes.containsKey('readonly');
+    case 'read-write':
+      return !element.attributes.containsKey('readonly');
+
+    case 'nth-child':
+      return _nthMatches(element.elementIndex, pseudo.argument ?? '');
+    case 'nth-last-child':
+      return _nthMatches(element.elementIndexFromEnd, pseudo.argument ?? '');
+    case 'nth-of-type':
+      return _nthMatches(element.elementIndexOfType, pseudo.argument ?? '');
+    case 'nth-last-of-type':
+      return _nthMatches(element.elementIndexOfTypeFromEnd, pseudo.argument ?? '');
+
+    case 'not':
+      if (pseudo.selectorArg != null) {
+        return !_selectorMatches(element, pseudo.selectorArg!);
+      }
+      return true;
+    case 'is':
+    case 'matches':
+    case 'where':
+      if (pseudo.selectorArg != null) {
+        return _selectorMatches(element, pseudo.selectorArg!);
+      }
+      return false;
+    case 'has':
+      if (pseudo.selectorArg != null) {
+        // :has() checks if any descendant matches.
+        for (final desc in element.elementDescendants) {
+          if (_selectorMatches(desc, pseudo.selectorArg!)) return true;
+        }
+      }
+      return false;
+
+    default:
+      return true; // Unknown pseudo-classes pass (graceful degradation).
+  }
+}
+
+/// Evaluate an An+B expression against an index (1-based).
+bool _nthMatches(int index, String expression) {
+  final expr = expression.trim().toLowerCase();
+  if (expr == 'odd') return index % 2 == 1;
+  if (expr == 'even') return index % 2 == 0;
+
+  // Try simple number.
+  final simple = int.tryParse(expr);
+  if (simple != null) return index == simple;
+
+  // Parse An+B form.
+  final match = RegExp(r'^([+-]?\d*)n\s*([+-]\s*\d+)?$').firstMatch(expr);
+  if (match == null) return false;
+
+  final aStr = match.group(1) ?? '';
+  final bStr = (match.group(2) ?? '').replaceAll(' ', '');
+
+  int a;
+  if (aStr.isEmpty || aStr == '+') {
+    a = 1;
+  } else if (aStr == '-') {
+    a = -1;
+  } else {
+    a = int.tryParse(aStr) ?? 0;
+  }
+  final b = int.tryParse(bStr) ?? 0;
+
+  if (a == 0) return index == b;
+  final diff = index - b;
+  if (diff == 0) return true;
+  return diff % a == 0 && diff ~/ a >= 0;
 }
 
 /// Properties that inherit from parent to child.
@@ -155,6 +433,11 @@ const _inheritableProperties = {
   'cursor',
   'list-style',
   'list-style-type',
+  'direction',
+  'text-indent',
+  'quotes',
+  'orphans',
+  'widows',
 };
 
 Map<String, String> _inheritableProps(Map<String, String> props) {
@@ -375,3 +658,5 @@ String _htmlFontSize(String size) {
   };
   return sizeMap[absolute] ?? '16px';
 }
+
+// blockElements is defined in dom.dart and imported above.

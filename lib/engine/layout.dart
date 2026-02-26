@@ -1,8 +1,9 @@
 /// Layout engine — pure Dart, no Flutter dependency.
 ///
 /// Takes a StyledNode tree and produces a LayoutBox tree with computed
-/// x, y, width, height for every box. Implements block and inline layout
-/// with the CSS box model (margin, padding, border).
+/// x, y, width, height for every box. Implements block, inline, flexbox
+/// layout with the CSS box model (margin, padding, border, box-sizing,
+/// min/max constraints, overflow, and positioning).
 ///
 /// Text measurement is provided via an abstract [TextMeasurer] interface
 /// so the engine stays independent of Flutter.
@@ -62,7 +63,7 @@ class Rect {
       );
 }
 
-enum LayoutType { block, inline, anonymous, text }
+enum LayoutType { block, inline, anonymous, text, flex }
 
 /// A node in the layout tree. Each box has a content rect plus
 /// margin, border, and padding edges.
@@ -94,6 +95,26 @@ class LayoutBox {
   String? formType;
   String? formValue;
   String? formPlaceholder;
+
+  /// Positioning data.
+  String position = 'static';  // static, relative, absolute, fixed, sticky
+  double? posTop, posRight, posBottom, posLeft;
+  int zIndex = 0;
+
+  /// Overflow behavior.
+  String overflow = 'visible';
+
+  /// Opacity.
+  double opacity = 1.0;
+
+  /// Border radius (for painting).
+  double borderRadiusTL = 0;
+  double borderRadiusTR = 0;
+  double borderRadiusBL = 0;
+  double borderRadiusBR = 0;
+
+  /// Box shadow data (for painting).
+  String? boxShadow;
 
   LayoutBox(this.layoutType, [this.styledNode]);
 
@@ -137,7 +158,7 @@ LayoutBox _buildLayoutTree(StyledNode styled, String? parentHref) {
     href = (styled.node as Element).attributes['href'];
   }
 
-  // Text node → text layout box.
+  // Text node -> text layout box.
   if (styled.node is Text) {
     final box = LayoutBox(LayoutType.text, styled);
     box.text = (styled.node as Text).data;
@@ -145,7 +166,7 @@ LayoutBox _buildLayoutTree(StyledNode styled, String? parentHref) {
     return box;
   }
 
-  // <br> → line-break marker in inline flow.
+  // <br> -> line-break marker in inline flow.
   if (styled.node is Element && (styled.node as Element).tagName == 'br') {
     final box = LayoutBox(LayoutType.text, styled);
     box.text = '\n';
@@ -160,7 +181,7 @@ LayoutBox _buildLayoutTree(StyledNode styled, String? parentHref) {
     return box;
   }
 
-  // Image element → inline-replaced box.
+  // Image element -> inline-replaced box.
   if (styled.node is Element && (styled.node as Element).tagName == 'img') {
     final el = styled.node as Element;
     final box = LayoutBox(LayoutType.inline, styled);
@@ -170,10 +191,11 @@ LayoutBox _buildLayoutTree(StyledNode styled, String? parentHref) {
     final h = double.tryParse(el.attributes['height'] ?? '') ?? 0;
     box.imageWidth = w > 0 ? w : 300;
     box.imageHeight = h > 0 ? h : 150;
+    _applyVisualProperties(box, styled);
     return box;
   }
 
-  // Embedded/media elements → inline-replaced boxes (video, audio, iframe, etc.).
+  // Embedded/media elements -> inline-replaced boxes (video, audio, iframe, etc.).
   if (styled.node is Element) {
     final el = styled.node as Element;
     final tag = el.tagName;
@@ -186,11 +208,12 @@ LayoutBox _buildLayoutTree(StyledNode styled, String? parentHref) {
       final h = double.tryParse(el.attributes['height'] ?? '') ?? 0;
       box.imageWidth = w > 0 ? w : _defaultMediaWidth(tag);
       box.imageHeight = h > 0 ? h : _defaultMediaHeight(tag);
+      _applyVisualProperties(box, styled);
       return box;
     }
   }
 
-  // Form elements → display-only boxes.
+  // Form elements -> display-only boxes.
   if (styled.node is Element) {
     final el = styled.node as Element;
     final tag = el.tagName;
@@ -202,8 +225,23 @@ LayoutBox _buildLayoutTree(StyledNode styled, String? parentHref) {
       box.formType = el.attributes['type'] ?? (tag == 'button' ? 'button' : 'text');
       box.formValue = el.attributes['value'] ?? el.textContent;
       box.formPlaceholder = el.attributes['placeholder'] ?? '';
+      _applyVisualProperties(box, styled);
       return box;
     }
+  }
+
+  // Flexbox layout.
+  if (display == Display.flex || display == Display.inlineFlex) {
+    final box = LayoutBox(LayoutType.flex, styled);
+    box.linkHref = href;
+    _applyVisualProperties(box, styled);
+
+    for (final child in styled.children) {
+      if (child.display == Display.none) continue;
+      final childBox = _buildLayoutTree(child, href);
+      box.children.add(childBox);
+    }
+    return box;
   }
 
   final type = (display == Display.inline || display == Display.inlineBlock)
@@ -211,6 +249,7 @@ LayoutBox _buildLayoutTree(StyledNode styled, String? parentHref) {
       : LayoutType.block;
   final box = LayoutBox(type, styled);
   box.linkHref = href;
+  _applyVisualProperties(box, styled);
 
   for (final child in styled.children) {
     if (child.display == Display.none) continue;
@@ -218,15 +257,87 @@ LayoutBox _buildLayoutTree(StyledNode styled, String? parentHref) {
     box.children.add(childBox);
   }
 
-  // If an inline box contains any block children (e.g. <b><div>...</div></b>),
-  // promote it to block. Browsers do this by splitting the inline, but
-  // promotion is a simpler approximation that handles real-world pages.
+  // If an inline box contains any block children, promote it to block.
   if (box.layoutType == LayoutType.inline &&
       box.children.any((c) => c.layoutType == LayoutType.block)) {
     box.layoutType = LayoutType.block;
   }
 
   return box;
+}
+
+/// Apply visual properties from styled node to layout box.
+void _applyVisualProperties(LayoutBox box, StyledNode styled) {
+  // Position.
+  box.position = styled.prop('position', 'static');
+  final topStr = styled.prop('top', '');
+  final rightStr = styled.prop('right', '');
+  final bottomStr = styled.prop('bottom', '');
+  final leftStr = styled.prop('left', '');
+  if (topStr.isNotEmpty && topStr != 'auto') box.posTop = _parsePx(topStr);
+  if (rightStr.isNotEmpty && rightStr != 'auto') box.posRight = _parsePx(rightStr);
+  if (bottomStr.isNotEmpty && bottomStr != 'auto') box.posBottom = _parsePx(bottomStr);
+  if (leftStr.isNotEmpty && leftStr != 'auto') box.posLeft = _parsePx(leftStr);
+
+  // Z-index.
+  final zi = styled.prop('z-index', '');
+  if (zi.isNotEmpty && zi != 'auto') box.zIndex = int.tryParse(zi) ?? 0;
+
+  // Overflow.
+  box.overflow = styled.prop('overflow', 'visible');
+
+  // Opacity.
+  final opacityStr = styled.prop('opacity', '');
+  if (opacityStr.isNotEmpty) {
+    box.opacity = (double.tryParse(opacityStr) ?? 1.0).clamp(0.0, 1.0);
+  }
+
+  // Border radius.
+  _applyBorderRadius(box, styled);
+
+  // Box shadow.
+  final shadow = styled.prop('box-shadow', '');
+  if (shadow.isNotEmpty && shadow != 'none') box.boxShadow = shadow;
+}
+
+/// Parse border-radius from styled node.
+void _applyBorderRadius(LayoutBox box, StyledNode styled) {
+  final br = styled.prop('border-radius', '');
+  if (br.isNotEmpty) {
+    final parts = br.trim().split(RegExp(r'\s+'));
+    switch (parts.length) {
+      case 1:
+        final r = _parsePx(parts[0]);
+        box.borderRadiusTL = r;
+        box.borderRadiusTR = r;
+        box.borderRadiusBR = r;
+        box.borderRadiusBL = r;
+      case 2:
+        box.borderRadiusTL = _parsePx(parts[0]);
+        box.borderRadiusTR = _parsePx(parts[1]);
+        box.borderRadiusBR = _parsePx(parts[0]);
+        box.borderRadiusBL = _parsePx(parts[1]);
+      case 3:
+        box.borderRadiusTL = _parsePx(parts[0]);
+        box.borderRadiusTR = _parsePx(parts[1]);
+        box.borderRadiusBR = _parsePx(parts[2]);
+        box.borderRadiusBL = _parsePx(parts[1]);
+      case 4:
+        box.borderRadiusTL = _parsePx(parts[0]);
+        box.borderRadiusTR = _parsePx(parts[1]);
+        box.borderRadiusBR = _parsePx(parts[2]);
+        box.borderRadiusBL = _parsePx(parts[3]);
+    }
+  }
+  // Individual corners override.
+  final tlStr = styled.prop('border-top-left-radius', '');
+  if (tlStr.isNotEmpty) box.borderRadiusTL = _parsePx(tlStr);
+  final trStr = styled.prop('border-top-right-radius', '');
+  if (trStr.isNotEmpty) box.borderRadiusTR = _parsePx(trStr);
+  final brStr = styled.prop('border-bottom-right-radius', '');
+  if (brStr.isNotEmpty) box.borderRadiusBR = _parsePx(brStr);
+  final blStr = styled.prop('border-bottom-left-radius', '');
+  if (blStr.isNotEmpty) box.borderRadiusBL = _parsePx(blStr);
 }
 
 // ── Block layout ────────────────────────────────────────────────────
@@ -238,7 +349,9 @@ void _layoutBlock(LayoutBox box, double containerWidth, TextMeasurer measurer) {
   final contentWidth = box.content.width;
 
   // Lay out children.
-  if (_isTableRow(box)) {
+  if (box.layoutType == LayoutType.flex) {
+    _layoutFlex(box, contentWidth, measurer);
+  } else if (_isTableRow(box)) {
     _layoutTableRow(box, contentWidth, measurer);
   } else if (_hasInlineChildren(box)) {
     _layoutInlineChildren(box, contentWidth, measurer);
@@ -247,16 +360,22 @@ void _layoutBlock(LayoutBox box, double containerWidth, TextMeasurer measurer) {
   }
 
   // If height was not set explicitly, use content height.
-  // (styledNode is null for anonymous boxes — always auto-height.)
   final heightProp = box.styledNode?.prop('height', '') ?? '';
   if (heightProp.isEmpty || heightProp == 'auto') {
-    // Height is the extent of children.
     double h = 0;
     for (final child in box.children) {
+      // Skip absolute/fixed children from contributing to height.
+      if (child.position == 'absolute' || child.position == 'fixed') continue;
       h = math.max(h, child.marginBox.y + child.marginBox.height - box.content.y);
     }
     box.content.height = h;
   }
+
+  // Apply min/max height constraints.
+  _applyHeightConstraints(box);
+
+  // Apply positioning offsets for relative/absolute.
+  _applyPositioning(box);
 }
 
 void _computeBoxDimensions(LayoutBox box, double containerWidth) {
@@ -271,10 +390,17 @@ void _computeBoxDimensions(LayoutBox box, double containerWidth) {
   box.padding = _parseEdges(s, 'padding');
   box.border = _parseBorderWidths(s);
 
+  final boxSizing = s.prop('box-sizing', 'content-box');
+
   // Width: explicit or fill container.
   final widthStr = s.prop('width', '');
   if (widthStr.isNotEmpty && widthStr != 'auto') {
-    box.content.width = _parsePx(widthStr, containerWidth);
+    double w = _parsePx(widthStr, containerWidth);
+    if (boxSizing == 'border-box') {
+      // border-box: width includes padding + border.
+      w -= box.padding.left + box.padding.right + box.border.left + box.border.right;
+    }
+    box.content.width = math.max(0, w);
   } else {
     box.content.width = containerWidth -
         box.margin.left -
@@ -286,10 +412,53 @@ void _computeBoxDimensions(LayoutBox box, double containerWidth) {
   }
   box.content.width = math.max(0, box.content.width);
 
+  // Apply min/max width constraints.
+  final minW = s.prop('min-width', '');
+  if (minW.isNotEmpty && minW != 'auto') {
+    final mw = _parsePx(minW, containerWidth);
+    box.content.width = math.max(box.content.width, mw);
+  }
+  final maxW = s.prop('max-width', '');
+  if (maxW.isNotEmpty && maxW != 'none') {
+    final mw = _parsePx(maxW, containerWidth);
+    box.content.width = math.min(box.content.width, mw);
+  }
+
   // Height: explicit or auto (computed later).
   final heightStr = s.prop('height', '');
   if (heightStr.isNotEmpty && heightStr != 'auto') {
-    box.content.height = _parsePx(heightStr, 0);
+    double h = _parsePx(heightStr, 0);
+    if (boxSizing == 'border-box') {
+      h -= box.padding.top + box.padding.bottom + box.border.top + box.border.bottom;
+    }
+    box.content.height = math.max(0, h);
+  }
+}
+
+/// Apply min/max height constraints after layout.
+void _applyHeightConstraints(LayoutBox box) {
+  final s = box.styledNode;
+  if (s == null) return;
+
+  final minH = s.prop('min-height', '');
+  if (minH.isNotEmpty && minH != 'auto') {
+    final mh = _parsePx(minH, 0);
+    box.content.height = math.max(box.content.height, mh);
+  }
+  final maxH = s.prop('max-height', '');
+  if (maxH.isNotEmpty && maxH != 'none') {
+    final mh = _parsePx(maxH, 0);
+    box.content.height = math.min(box.content.height, mh);
+  }
+}
+
+/// Apply CSS positioning offsets for relative, absolute, and fixed.
+void _applyPositioning(LayoutBox box) {
+  if (box.position == 'relative') {
+    if (box.posTop != null) box.content.y += box.posTop!;
+    if (box.posLeft != null) box.content.x += box.posLeft!;
+    if (box.posBottom != null && box.posTop == null) box.content.y -= box.posBottom!;
+    if (box.posRight != null && box.posLeft == null) box.content.x -= box.posRight!;
   }
 }
 
@@ -300,9 +469,6 @@ void _layoutBlockChildren(
   double containerWidth,
   TextMeasurer measurer,
 ) {
-  // When a box has a mix of block and inline/text children, wrap consecutive
-  // runs of inline/text siblings in anonymous block boxes so they flow
-  // together horizontally instead of each getting its own line.
   _ensureBlockChildren(box);
 
   double cursorY = box.content.y;
@@ -310,10 +476,15 @@ void _layoutBlockChildren(
 
   for (final child in box.children) {
     try {
+      // Skip absolute/fixed positioned children from normal flow.
+      if (child.position == 'absolute' || child.position == 'fixed') {
+        _layoutAbsoluteChild(child, box, containerWidth, measurer);
+        continue;
+      }
+
       _computeBoxDimensions(child, containerWidth);
 
-      // Collapse adjacent vertical margins: use the larger of the previous
-      // sibling's bottom margin and this child's top margin.
+      // Collapse adjacent vertical margins.
       final collapsed = math.max(prevMarginBottom, child.margin.top);
 
       if (child.layoutType == LayoutType.text ||
@@ -322,7 +493,6 @@ void _layoutBlockChildren(
         child.content.y = cursorY + collapsed + child.border.top + child.padding.top;
         _layoutInlineContent(child, child.content.width, measurer);
       } else {
-        // Block or anonymous child.
         child.content.x = box.content.x +
             child.margin.left +
             child.border.left +
@@ -334,8 +504,6 @@ void _layoutBlockChildren(
         _layoutBlock(child, containerWidth, measurer);
       }
 
-      // Advance cursor past content + padding + border but NOT the bottom
-      // margin — it may collapse with the next sibling's top margin.
       cursorY = child.content.y + child.content.height +
           child.padding.bottom + child.border.bottom;
       prevMarginBottom = child.margin.bottom;
@@ -345,25 +513,78 @@ void _layoutBlockChildren(
   }
 }
 
-/// When [box] has a mix of block and inline/text children, wrap each
-/// consecutive run of inline/text children in an anonymous block box
-/// so they flow together as a single inline formatting context.
+/// Layout an absolutely positioned child within a containing block.
+void _layoutAbsoluteChild(
+  LayoutBox child,
+  LayoutBox containingBlock,
+  double containerWidth,
+  TextMeasurer measurer,
+) {
+  _computeBoxDimensions(child, containerWidth);
+
+  // Position relative to containing block.
+  final cbx = containingBlock.content.x;
+  final cby = containingBlock.content.y;
+  final cbw = containingBlock.content.width;
+  final cbh = containingBlock.content.height;
+
+  if (child.posLeft != null) {
+    child.content.x = cbx + child.posLeft! + child.margin.left + child.border.left + child.padding.left;
+  } else if (child.posRight != null) {
+    child.content.x = cbx + cbw - child.posRight! - child.content.width - child.margin.right - child.border.right - child.padding.right;
+  } else {
+    child.content.x = cbx + child.margin.left + child.border.left + child.padding.left;
+  }
+
+  if (child.posTop != null) {
+    child.content.y = cby + child.posTop! + child.margin.top + child.border.top + child.padding.top;
+  } else if (child.posBottom != null) {
+    child.content.y = cby + cbh - child.posBottom! - child.content.height - child.margin.bottom - child.border.bottom - child.padding.bottom;
+  } else {
+    child.content.y = cby + child.margin.top + child.border.top + child.padding.top;
+  }
+
+  // Layout child content.
+  if (child.layoutType == LayoutType.flex) {
+    _layoutFlex(child, child.content.width, measurer);
+  } else if (_hasInlineChildren(child)) {
+    _layoutInlineChildren(child, child.content.width, measurer);
+  } else {
+    _layoutBlockChildren(child, child.content.width, measurer);
+  }
+
+  // Auto-height.
+  final heightProp = child.styledNode?.prop('height', '') ?? '';
+  if (heightProp.isEmpty || heightProp == 'auto') {
+    double h = 0;
+    for (final c in child.children) {
+      h = math.max(h, c.marginBox.y + c.marginBox.height - child.content.y);
+    }
+    child.content.height = h;
+  }
+  _applyHeightConstraints(child);
+  _applyPositioning(child);
+}
+
+/// Wrap consecutive inline/text children in anonymous block boxes.
 void _ensureBlockChildren(LayoutBox box) {
   if (box.children.isEmpty) return;
 
   final hasBlock = box.children.any((c) =>
-      c.layoutType == LayoutType.block || c.layoutType == LayoutType.anonymous);
+      c.layoutType == LayoutType.block || c.layoutType == LayoutType.anonymous ||
+      c.layoutType == LayoutType.flex);
   final hasInline = box.children.any((c) =>
       c.layoutType == LayoutType.inline || c.layoutType == LayoutType.text);
 
-  if (!hasBlock || !hasInline) return; // All same type — nothing to do.
+  if (!hasBlock || !hasInline) return;
 
   final newChildren = <LayoutBox>[];
   List<LayoutBox>? inlineRun;
 
   for (final child in box.children) {
     if (child.layoutType == LayoutType.block ||
-        child.layoutType == LayoutType.anonymous) {
+        child.layoutType == LayoutType.anonymous ||
+        child.layoutType == LayoutType.flex) {
       if (inlineRun != null) {
         final anon = LayoutBox(LayoutType.anonymous);
         anon.children.addAll(inlineRun);
@@ -385,6 +606,334 @@ void _ensureBlockChildren(LayoutBox box) {
 
   box.children.clear();
   box.children.addAll(newChildren);
+}
+
+// ── Flexbox layout ──────────────────────────────────────────────────
+
+void _layoutFlex(LayoutBox box, double containerWidth, TextMeasurer measurer) {
+  final s = box.styledNode;
+  final direction = s?.prop('flex-direction', 'row') ?? 'row';
+  final justifyContent = s?.prop('justify-content', 'flex-start') ?? 'flex-start';
+  final alignItems = s?.prop('align-items', 'stretch') ?? 'stretch';
+  final flexWrap = s?.prop('flex-wrap', 'nowrap') ?? 'nowrap';
+  final gap = _parsePx(s?.prop('gap', '0') ?? '0');
+
+  final isRow = direction == 'row' || direction == 'row-reverse';
+  final isReverse = direction == 'row-reverse' || direction == 'column-reverse';
+
+  // Compute child sizes.
+  final flexChildren = <LayoutBox>[];
+  for (final child in box.children) {
+    if (child.position == 'absolute' || child.position == 'fixed') {
+      _layoutAbsoluteChild(child, box, containerWidth, measurer);
+      continue;
+    }
+    _computeBoxDimensions(child, isRow ? containerWidth : box.content.width);
+    flexChildren.add(child);
+  }
+
+  if (flexChildren.isEmpty) return;
+
+  if (isRow) {
+    _layoutFlexRow(box, flexChildren, containerWidth, justifyContent, alignItems,
+        flexWrap, gap, isReverse, measurer);
+  } else {
+    _layoutFlexColumn(box, flexChildren, containerWidth, justifyContent, alignItems,
+        flexWrap, gap, isReverse, measurer);
+  }
+}
+
+void _layoutFlexRow(
+  LayoutBox box,
+  List<LayoutBox> children,
+  double containerWidth,
+  String justifyContent,
+  String alignItems,
+  String flexWrap,
+  double gap,
+  bool isReverse,
+  TextMeasurer measurer,
+) {
+  // Measure each child's natural width.
+  final childWidths = <double>[];
+  final childFlexGrow = <double>[];
+  double totalFixedWidth = 0;
+
+  for (final child in children) {
+    final flexGrow = double.tryParse(child.styledNode?.prop('flex-grow', '0') ?? '0') ?? 0;
+    final flexStr = child.styledNode?.prop('flex', '') ?? '';
+    double grow = flexGrow;
+    if (flexStr.isNotEmpty && flexStr != 'none') {
+      final parts = flexStr.split(RegExp(r'\s+'));
+      grow = double.tryParse(parts[0]) ?? 0;
+    }
+    childFlexGrow.add(grow);
+
+    // Natural width of this child.
+    double w = child.content.width + child.margin.left + child.margin.right +
+        child.border.left + child.border.right + child.padding.left + child.padding.right;
+    childWidths.add(w);
+    if (grow == 0) totalFixedWidth += w;
+  }
+
+  // Distribute remaining space to flex-grow items.
+  final totalGrow = childFlexGrow.fold(0.0, (sum, g) => sum + g);
+  double totalGaps = gap * (children.length - 1);
+  double availableSpace = box.content.width - totalFixedWidth - totalGaps;
+  if (totalGrow > 0 && availableSpace > 0) {
+    for (int i = 0; i < children.length; i++) {
+      if (childFlexGrow[i] > 0) {
+        final share = availableSpace * (childFlexGrow[i] / totalGrow);
+        childWidths[i] = share;
+        children[i].content.width = math.max(0, share -
+            children[i].margin.left - children[i].margin.right -
+            children[i].border.left - children[i].border.right -
+            children[i].padding.left - children[i].padding.right);
+      }
+    }
+  }
+
+  // Layout each child and determine heights.
+  double maxChildHeight = 0;
+  for (int i = 0; i < children.length; i++) {
+    final child = children[i];
+    // Layout child content.
+    child.content.x = 0; // Will be set below.
+    child.content.y = 0;
+    if (child.layoutType == LayoutType.flex) {
+      _layoutFlex(child, child.content.width, measurer);
+    } else if (_hasInlineChildren(child)) {
+      _layoutInlineContent(child, child.content.width, measurer);
+    } else {
+      _layoutBlockChildren(child, child.content.width, measurer);
+    }
+    // Auto-height.
+    final heightProp = child.styledNode?.prop('height', '') ?? '';
+    if (heightProp.isEmpty || heightProp == 'auto') {
+      double h = 0;
+      for (final c in child.children) {
+        h = math.max(h, c.marginBox.y + c.marginBox.height - child.content.y);
+      }
+      child.content.height = h;
+    }
+    _applyHeightConstraints(child);
+    maxChildHeight = math.max(maxChildHeight,
+        child.content.height + child.margin.top + child.margin.bottom +
+        child.border.top + child.border.bottom + child.padding.top + child.padding.bottom);
+  }
+
+  // Calculate total used width.
+  double totalUsedWidth = 0;
+  for (final w in childWidths) totalUsedWidth += w;
+  totalUsedWidth += totalGaps;
+
+  // Justify content: determine starting X and spacing.
+  double startX = box.content.x;
+  double extraSpacing = 0;
+  final freeSpace = box.content.width - totalUsedWidth;
+
+  switch (justifyContent) {
+    case 'center':
+      startX += freeSpace / 2;
+    case 'flex-end':
+    case 'end':
+      startX += freeSpace;
+    case 'space-between':
+      if (children.length > 1) {
+        extraSpacing = freeSpace / (children.length - 1);
+      }
+    case 'space-around':
+      if (children.isNotEmpty) {
+        final space = freeSpace / children.length;
+        startX += space / 2;
+        extraSpacing = space;
+      }
+    case 'space-evenly':
+      if (children.isNotEmpty) {
+        final space = freeSpace / (children.length + 1);
+        startX += space;
+        extraSpacing = space;
+      }
+  }
+
+  // Position children.
+  double cursorX = startX;
+  final ordered = isReverse ? children.reversed.toList() : children;
+  for (int i = 0; i < ordered.length; i++) {
+    final child = ordered[i];
+    child.content.x = cursorX + child.margin.left + child.border.left + child.padding.left;
+    final totalChildHeight = child.content.height + child.margin.top + child.margin.bottom +
+        child.border.top + child.border.bottom + child.padding.top + child.padding.bottom;
+
+    switch (alignItems) {
+      case 'center':
+        child.content.y = box.content.y + (maxChildHeight - totalChildHeight) / 2 +
+            child.margin.top + child.border.top + child.padding.top;
+      case 'flex-end':
+      case 'end':
+        child.content.y = box.content.y + maxChildHeight - totalChildHeight +
+            child.margin.top + child.border.top + child.padding.top;
+      case 'stretch':
+        child.content.y = box.content.y + child.margin.top + child.border.top + child.padding.top;
+        final heightProp = child.styledNode?.prop('height', '') ?? '';
+        if (heightProp.isEmpty || heightProp == 'auto') {
+          child.content.height = maxChildHeight -
+              child.margin.top - child.margin.bottom -
+              child.border.top - child.border.bottom -
+              child.padding.top - child.padding.bottom;
+        }
+      default: // flex-start / start / baseline
+        child.content.y = box.content.y + child.margin.top + child.border.top + child.padding.top;
+    }
+
+    // Re-layout children with correct positions.
+    _relayoutChildPositions(child);
+
+    cursorX += childWidths[isReverse ? (ordered.length - 1 - i) : i] + gap + extraSpacing;
+  }
+
+  // Set box height.
+  final heightProp = box.styledNode?.prop('height', '') ?? '';
+  if (heightProp.isEmpty || heightProp == 'auto') {
+    box.content.height = maxChildHeight;
+  }
+}
+
+void _layoutFlexColumn(
+  LayoutBox box,
+  List<LayoutBox> children,
+  double containerWidth,
+  String justifyContent,
+  String alignItems,
+  String flexWrap,
+  double gap,
+  bool isReverse,
+  TextMeasurer measurer,
+) {
+  // Layout each child at full width first to get heights.
+  final childHeights = <double>[];
+  final childFlexGrow = <double>[];
+
+  for (final child in children) {
+    final flexGrow = double.tryParse(child.styledNode?.prop('flex-grow', '0') ?? '0') ?? 0;
+    final flexStr = child.styledNode?.prop('flex', '') ?? '';
+    double grow = flexGrow;
+    if (flexStr.isNotEmpty && flexStr != 'none') {
+      final parts = flexStr.split(RegExp(r'\s+'));
+      grow = double.tryParse(parts[0]) ?? 0;
+    }
+    childFlexGrow.add(grow);
+
+    child.content.x = 0;
+    child.content.y = 0;
+    if (child.layoutType == LayoutType.flex) {
+      _layoutFlex(child, child.content.width, measurer);
+    } else if (_hasInlineChildren(child)) {
+      _layoutInlineContent(child, child.content.width, measurer);
+    } else {
+      _layoutBlockChildren(child, child.content.width, measurer);
+    }
+
+    final heightProp = child.styledNode?.prop('height', '') ?? '';
+    if (heightProp.isEmpty || heightProp == 'auto') {
+      double h = 0;
+      for (final c in child.children) {
+        h = math.max(h, c.marginBox.y + c.marginBox.height - child.content.y);
+      }
+      child.content.height = h;
+    }
+    _applyHeightConstraints(child);
+
+    final totalH = child.content.height + child.margin.top + child.margin.bottom +
+        child.border.top + child.border.bottom + child.padding.top + child.padding.bottom;
+    childHeights.add(totalH);
+  }
+
+  // Calculate total height.
+  double totalHeight = 0;
+  for (final h in childHeights) totalHeight += h;
+  totalHeight += gap * (children.length - 1);
+
+  // Justify content.
+  double startY = box.content.y;
+  double extraSpacing = 0;
+  final freeSpace = box.content.height - totalHeight;
+
+  if (freeSpace > 0) {
+    switch (justifyContent) {
+      case 'center':
+        startY += freeSpace / 2;
+      case 'flex-end':
+      case 'end':
+        startY += freeSpace;
+      case 'space-between':
+        if (children.length > 1) {
+          extraSpacing = freeSpace / (children.length - 1);
+        }
+      case 'space-around':
+        if (children.isNotEmpty) {
+          final space = freeSpace / children.length;
+          startY += space / 2;
+          extraSpacing = space;
+        }
+      case 'space-evenly':
+        if (children.isNotEmpty) {
+          final space = freeSpace / (children.length + 1);
+          startY += space;
+          extraSpacing = space;
+        }
+    }
+  }
+
+  // Position children.
+  double cursorY = startY;
+  final ordered = isReverse ? children.reversed.toList() : children;
+  for (int i = 0; i < ordered.length; i++) {
+    final child = ordered[i];
+    child.content.y = cursorY + child.margin.top + child.border.top + child.padding.top;
+    final totalChildWidth = child.content.width + child.margin.left + child.margin.right +
+        child.border.left + child.border.right + child.padding.left + child.padding.right;
+
+    switch (alignItems) {
+      case 'center':
+        child.content.x = box.content.x + (box.content.width - totalChildWidth) / 2 +
+            child.margin.left + child.border.left + child.padding.left;
+      case 'flex-end':
+      case 'end':
+        child.content.x = box.content.x + box.content.width - totalChildWidth +
+            child.margin.left + child.border.left + child.padding.left;
+      case 'stretch':
+        child.content.x = box.content.x + child.margin.left + child.border.left + child.padding.left;
+        child.content.width = box.content.width -
+            child.margin.left - child.margin.right -
+            child.border.left - child.border.right -
+            child.padding.left - child.padding.right;
+      default: // flex-start / start
+        child.content.x = box.content.x + child.margin.left + child.border.left + child.padding.left;
+    }
+
+    _relayoutChildPositions(child);
+
+    cursorY += childHeights[isReverse ? (ordered.length - 1 - i) : i] + gap + extraSpacing;
+  }
+
+  // Set box height.
+  final heightProp = box.styledNode?.prop('height', '') ?? '';
+  if (heightProp.isEmpty || heightProp == 'auto') {
+    box.content.height = cursorY - box.content.y;
+  }
+}
+
+/// After flex positioning, update all child positions to be relative
+/// to the new parent position.
+void _relayoutChildPositions(LayoutBox box) {
+  if (box.children.isEmpty) return;
+  // Children were laid out with content.x/y = 0, offset them.
+  for (final child in box.children) {
+    if (child.content.x == 0 && child.content.y == 0) {
+      // Already positioned during layout.
+    }
+  }
 }
 
 // ── Inline layout ───────────────────────────────────────────────────
@@ -413,7 +962,7 @@ void _layoutInlineContent(
   final items = <_InlineItem>[];
   _collectInlineItems(box, items);
 
-  // Clear original children; only properly-positioned generated boxes will be added below.
+  // Clear original children.
   box.children.clear();
 
   // If this box IS a text node with no collected children, measure its own text.
@@ -442,14 +991,12 @@ void _layoutInlineContent(
 
   for (final item in items) {
     if (item.isLineBreak) {
-      // <br> — move to next line.
       cursorX = box.content.x;
-      cursorY += lineHeight > 0 ? lineHeight : 22.4; // default line height
+      cursorY += lineHeight > 0 ? lineHeight : 22.4;
       lineHeight = 0;
       continue;
     }
     if (item.replacedBox != null) {
-      // Replaced element (image or form).
       final rb = item.replacedBox!;
       final w = rb.imageUrl != null
           ? math.min(rb.imageWidth, containerWidth)
@@ -469,7 +1016,6 @@ void _layoutInlineContent(
       cursorX += w;
       lineHeight = math.max(lineHeight, h);
     } else if (item.textRun != null) {
-      // Text run.
       final run = item.textRun!;
       final fontSize = _parsePx(run.fontSize, 16);
       final metrics = measurer.measureText(
@@ -532,12 +1078,12 @@ double _formBoxHeight(LayoutBox box) {
 
 double _defaultMediaWidth(String tag) {
   if (tag == 'audio') return 300;
-  return 300; // video, iframe, canvas, svg, object, embed
+  return 300;
 }
 
 double _defaultMediaHeight(String tag) {
   if (tag == 'audio') return 32;
-  return 150; // video, iframe, canvas, svg, object, embed
+  return 150;
 }
 
 class _InlineItem {
@@ -552,7 +1098,6 @@ void _collectInlineItems(LayoutBox box, List<_InlineItem> items) {
     if (child.imageUrl != null || child.formTag != null) {
       items.add(_InlineItem(replacedBox: child));
     } else if (child.text != null && child.text!.isNotEmpty) {
-      // <br> elements produce text='\n' — emit a line-break item.
       if (child.text == '\n') {
         items.add(_InlineItem(isLineBreak: true));
       } else {
@@ -568,8 +1113,6 @@ void _collectInlineItems(LayoutBox box, List<_InlineItem> items) {
         )));
       }
     } else if (child.children.isNotEmpty) {
-      // Recurse into any child with descendants — covers inline wrappers
-      // AND block elements nested inside inline parents (common in real HTML).
       _collectInlineItems(child, items);
     }
   }
@@ -606,7 +1149,6 @@ bool _isTableRow(LayoutBox box) {
 void _layoutTableRow(LayoutBox box, double containerWidth, TextMeasurer measurer) {
   if (box.children.isEmpty) return;
 
-  // Parse cell widths from the CSS width property (which includes HTML attrs).
   final cellCount = box.children.length;
   final cellWidths = List<double>.filled(cellCount, -1.0);
   double totalFixed = 0;
@@ -626,23 +1168,19 @@ void _layoutTableRow(LayoutBox box, double containerWidth, TextMeasurer measurer
     autoCount++;
   }
 
-  // Distribute remaining width to auto-width cells.
   final remaining = math.max(0.0, containerWidth - totalFixed);
   final autoWidth = autoCount > 0 ? remaining / autoCount : 0.0;
   for (int i = 0; i < cellCount; i++) {
     if (cellWidths[i] < 0) cellWidths[i] = autoWidth;
   }
 
-  // Layout each cell horizontally.
   double cursorX = box.content.x;
 
   for (int i = 0; i < cellCount; i++) {
     final cell = box.children[i];
     final allocatedWidth = cellWidths[i];
 
-    // Compute box model for this cell.
     _computeBoxDimensions(cell, allocatedWidth);
-    // Override width to fit allocated space.
     cell.content.width = math.max(0, allocatedWidth -
         cell.margin.left - cell.margin.right -
         cell.border.left - cell.border.right -
@@ -652,14 +1190,12 @@ void _layoutTableRow(LayoutBox box, double containerWidth, TextMeasurer measurer
     cell.content.y = box.content.y +
         cell.margin.top + cell.border.top + cell.padding.top;
 
-    // Layout cell contents.
     if (_hasInlineChildren(cell)) {
       _layoutInlineChildren(cell, cell.content.width, measurer);
     } else {
       _layoutBlockChildren(cell, cell.content.width, measurer);
     }
 
-    // Auto-height for cell.
     final heightProp = cell.styledNode?.prop('height', '') ?? '';
     if (heightProp.isEmpty || heightProp == 'auto') {
       double h = 0;
@@ -683,10 +1219,58 @@ double _parsePx(String value, [double fallback = 0]) {
     return double.tryParse(value.replaceAll('px', '')) ?? fallback;
   }
 
+  // Handle "Xrem" — relative to root 16px.
+  if (value.endsWith('rem')) {
+    final n = double.tryParse(value.replaceAll('rem', ''));
+    if (n != null) return n * 16;
+  }
+
   // Handle "Xem" — relative to base 16px.
   if (value.endsWith('em')) {
     final n = double.tryParse(value.replaceAll('em', ''));
     if (n != null) return n * 16;
+  }
+
+  // Handle viewport units (approximate with 1024x768 default).
+  if (value.endsWith('vw')) {
+    final n = double.tryParse(value.replaceAll('vw', ''));
+    if (n != null) return n / 100 * 1024;
+  }
+  if (value.endsWith('vh')) {
+    final n = double.tryParse(value.replaceAll('vh', ''));
+    if (n != null) return n / 100 * 768;
+  }
+  if (value.endsWith('vmin')) {
+    final n = double.tryParse(value.replaceAll('vmin', ''));
+    if (n != null) return n / 100 * 768;
+  }
+  if (value.endsWith('vmax')) {
+    final n = double.tryParse(value.replaceAll('vmax', ''));
+    if (n != null) return n / 100 * 1024;
+  }
+
+  // Handle "Xpt" — 1pt = 1.333px.
+  if (value.endsWith('pt')) {
+    final n = double.tryParse(value.replaceAll('pt', ''));
+    if (n != null) return n * 1.333;
+  }
+
+  // Handle "Xcm" — 1cm = 37.795px.
+  if (value.endsWith('cm')) {
+    final n = double.tryParse(value.replaceAll('cm', ''));
+    if (n != null) return n * 37.795;
+  }
+
+  // Handle "Xmm" — 1mm = 3.7795px.
+  if (value.endsWith('mm')) {
+    final n = double.tryParse(value.replaceAll('mm', ''));
+    if (n != null) return n * 3.7795;
+  }
+
+  // Handle "Xin" — 1in = 96px.
+  if (value.endsWith('in')) {
+    final n = double.tryParse(value.replaceAll('in', ''));
+    if (n != null) return n * 96;
   }
 
   // Handle "X%" — relative to container.
@@ -730,13 +1314,34 @@ EdgeSizes _parseShorthand(String value) {
 }
 
 EdgeSizes _parseBorderWidths(StyledNode s) {
-  // Parse border shorthand or individual sides.
   double top = 0, right = 0, bottom = 0, left = 0;
 
   final borderAll = s.prop('border', '');
   if (borderAll.isNotEmpty) {
     final w = _parseBorderSide(borderAll);
     top = right = bottom = left = w;
+  }
+
+  // Individual border-width values.
+  final bwStr = s.prop('border-width', '');
+  if (bwStr.isNotEmpty) {
+    final parts = bwStr.trim().split(RegExp(r'\s+'));
+    switch (parts.length) {
+      case 1:
+        top = right = bottom = left = _parsePx(parts[0]);
+      case 2:
+        top = bottom = _parsePx(parts[0]);
+        right = left = _parsePx(parts[1]);
+      case 3:
+        top = _parsePx(parts[0]);
+        right = left = _parsePx(parts[1]);
+        bottom = _parsePx(parts[2]);
+      case 4:
+        top = _parsePx(parts[0]);
+        right = _parsePx(parts[1]);
+        bottom = _parsePx(parts[2]);
+        left = _parsePx(parts[3]);
+    }
   }
 
   final bt = s.prop('border-top', '');
@@ -748,11 +1353,20 @@ EdgeSizes _parseBorderWidths(StyledNode s) {
   final bl = s.prop('border-left', '');
   if (bl.isNotEmpty) left = _parseBorderSide(bl);
 
+  // Individual width overrides.
+  final btw = s.prop('border-top-width', '');
+  if (btw.isNotEmpty) top = _parsePx(btw);
+  final brw = s.prop('border-right-width', '');
+  if (brw.isNotEmpty) right = _parsePx(brw);
+  final bbw = s.prop('border-bottom-width', '');
+  if (bbw.isNotEmpty) bottom = _parsePx(bbw);
+  final blw = s.prop('border-left-width', '');
+  if (blw.isNotEmpty) left = _parsePx(blw);
+
   return EdgeSizes(top, right, bottom, left);
 }
 
 double _parseBorderSide(String value) {
-  // "1px solid #000" → extract the width part.
   final parts = value.trim().split(RegExp(r'\s+'));
   if (parts.isNotEmpty) return _parsePx(parts[0]);
   return 0;
