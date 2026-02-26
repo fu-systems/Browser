@@ -17,14 +17,16 @@ import '../network/fetcher.dart';
 import '../network/logger.dart';
 import '../plugin/plugin.dart';
 import '../plugin/plugin_pipeline.dart';
+import '../plugin/built_in/cookie_manager.dart';
 import 'flutter_text_measurer.dart';
 import 'page_painter.dart';
 import 'tab.dart' as tab_model;
 
 class BrowserShell extends StatefulWidget {
   final PluginPipeline? pluginPipeline;
+  final CookieManagerPlugin? cookieManager;
 
-  const BrowserShell({super.key, this.pluginPipeline});
+  const BrowserShell({super.key, this.pluginPipeline, this.cookieManager});
 
   @override
   State<BrowserShell> createState() => _BrowserShellState();
@@ -99,6 +101,9 @@ class _BrowserShellState extends State<BrowserShell> {
     });
 
     final pipeline = widget.pluginPipeline;
+
+    // Sync cookie plugin state with active tab's toggle.
+    widget.cookieManager?.cookiesEnabled = _activeTab.cookiesEnabled;
 
     try {
       // 1. Build a FetchRequest and run onBeforeRequest hooks.
@@ -784,8 +789,95 @@ class _BrowserShellState extends State<BrowserShell> {
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(maxWidth: 36),
           ),
+          if (widget.cookieManager != null) ...[
+            const SizedBox(width: 2),
+            _buildCookieToggle(),
+          ],
         ],
       ),
+    );
+  }
+
+  Widget _buildCookieToggle() {
+    final cm = widget.cookieManager!;
+    final enabled = _activeTab.cookiesEnabled;
+    final count = cm.cookieCount;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        GestureDetector(
+          onTap: () {
+            setState(() {
+              _activeTab.cookiesEnabled = !_activeTab.cookiesEnabled;
+              cm.cookiesEnabled = _activeTab.cookiesEnabled;
+            });
+          },
+          child: Tooltip(
+            message: enabled
+                ? 'Cookies: ON ($count stored) — click to disable'
+                : 'Cookies: OFF — click to enable',
+            child: Container(
+              height: 26,
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              decoration: BoxDecoration(
+                color: enabled ? const Color(0xFFE8F5E9) : const Color(0xFFF5F5F5),
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(
+                  color: enabled ? const Color(0xFF66BB6A) : Colors.grey.shade400,
+                  width: 0.5,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.cookie_outlined,
+                    size: 16,
+                    color: enabled ? const Color(0xFF2E7D32) : Colors.grey.shade600,
+                  ),
+                  const SizedBox(width: 3),
+                  Text(
+                    enabled ? 'ON' : 'OFF',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: enabled ? const Color(0xFF2E7D32) : Colors.grey.shade600,
+                    ),
+                  ),
+                  if (enabled && count > 0) ...[
+                    const SizedBox(width: 3),
+                    Text(
+                      '($count)',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 2),
+        IconButton(
+          icon: Icon(
+            Icons.delete_outline,
+            size: 18,
+            color: count > 0 ? Colors.red.shade400 : Colors.grey.shade400,
+          ),
+          onPressed: count > 0
+              ? () {
+                  setState(() {
+                    cm.purgeAll();
+                  });
+                }
+              : null,
+          tooltip: count > 0 ? 'Purge all cookies ($count)' : 'No cookies to purge',
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(maxWidth: 30),
+        ),
+      ],
     );
   }
 

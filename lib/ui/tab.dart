@@ -28,6 +28,9 @@ class Tab {
   List<Rect> searchRects = [];
   int searchIndex = -1;
 
+  /// Cookie toggle — per-tab, default off.
+  bool cookiesEnabled = false;
+
   Tab({this.url = '', this.title = 'New Tab'});
 
   bool get canGoBack => backHistory.isNotEmpty;

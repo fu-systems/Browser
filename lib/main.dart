@@ -3,6 +3,7 @@ import 'plugin/plugin_context.dart';
 import 'plugin/plugin_manifest.dart';
 import 'plugin/plugin_pipeline.dart';
 import 'plugin/plugin_registry.dart';
+import 'plugin/built_in/cookie_manager.dart';
 import 'plugin/built_in/dark_mode.dart';
 import 'plugin/built_in/privacy_shield.dart';
 import 'ui/browser.dart';
@@ -35,17 +36,40 @@ void main() {
     ),
   );
 
-  // Built-ins start disabled — user enables via settings.
+  final cookieManager = CookieManagerPlugin();
+  registry.register(
+    cookieManager,
+    const PluginManifest(
+      name: 'cookie_manager',
+      version: '1.0.0',
+      description: 'Per-tab cookie control with file-based storage.',
+      author: 'Pane',
+      capabilities: {PluginCapability.network, PluginCapability.cookies},
+    ),
+  );
+  // Cookie manager is always enabled — gated by the per-tab toggle.
+  registry.enable('cookie_manager');
+
   final pipeline = PluginPipeline(registry, context);
 
-  runApp(PaneApp(pipeline: pipeline, registry: registry));
+  runApp(PaneApp(
+    pipeline: pipeline,
+    registry: registry,
+    cookieManager: cookieManager,
+  ));
 }
 
 class PaneApp extends StatelessWidget {
   final PluginPipeline pipeline;
   final PluginRegistry registry;
+  final CookieManagerPlugin cookieManager;
 
-  const PaneApp({super.key, required this.pipeline, required this.registry});
+  const PaneApp({
+    super.key,
+    required this.pipeline,
+    required this.registry,
+    required this.cookieManager,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -59,7 +83,10 @@ class PaneApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: BrowserShell(pluginPipeline: pipeline),
+      home: BrowserShell(
+        pluginPipeline: pipeline,
+        cookieManager: cookieManager,
+      ),
     );
   }
 }
