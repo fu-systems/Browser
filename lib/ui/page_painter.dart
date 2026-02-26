@@ -290,13 +290,23 @@ class PagePainter extends CustomPainter {
     if (type == 'checkbox') {
       final rect = ui.Rect.fromLTWH(r.x, r.y, 14, 14);
       canvas.drawRect(rect, Paint()..color = Colors.white);
-      canvas.drawRect(rect, Paint()..color = Colors.grey..style = PaintingStyle.stroke..strokeWidth = 1.5);
+      canvas.drawRect(rect, Paint()..color = (box.formFocused ? Colors.blue : Colors.grey)..style = PaintingStyle.stroke..strokeWidth = 1.5);
+      if (box.formChecked) {
+        final path = Path()
+          ..moveTo(r.x + 3, r.y + 7)
+          ..lineTo(r.x + 6, r.y + 11)
+          ..lineTo(r.x + 11, r.y + 3);
+        canvas.drawPath(path, Paint()..color = Colors.blue..style = PaintingStyle.stroke..strokeWidth = 2);
+      }
       return;
     }
 
     if (type == 'radio') {
       canvas.drawCircle(Offset(r.x + 7, r.y + 7), 7, Paint()..color = Colors.white);
-      canvas.drawCircle(Offset(r.x + 7, r.y + 7), 7, Paint()..color = Colors.grey..style = PaintingStyle.stroke..strokeWidth = 1.5);
+      canvas.drawCircle(Offset(r.x + 7, r.y + 7), 7, Paint()..color = (box.formFocused ? Colors.blue : Colors.grey)..style = PaintingStyle.stroke..strokeWidth = 1.5);
+      if (box.formChecked) {
+        canvas.drawCircle(Offset(r.x + 7, r.y + 7), 4, Paint()..color = Colors.blue);
+      }
       return;
     }
 
@@ -305,8 +315,8 @@ class PagePainter extends CustomPainter {
         ui.Rect.fromLTWH(r.x, r.y, r.width, r.height),
         const Radius.circular(3),
       );
-      canvas.drawRRect(rrect, Paint()..color = const Color(0xFFE8E8E8));
-      canvas.drawRRect(rrect, Paint()..color = Colors.grey..style = PaintingStyle.stroke..strokeWidth = 1);
+      canvas.drawRRect(rrect, Paint()..color = box.formFocused ? const Color(0xFFD0D0D0) : const Color(0xFFE8E8E8));
+      canvas.drawRRect(rrect, Paint()..color = box.formFocused ? Colors.blue : Colors.grey..style = PaintingStyle.stroke..strokeWidth = 1);
       final label = box.formValue?.isNotEmpty == true ? box.formValue! : (type == 'submit' ? 'Submit' : 'Button');
       _drawLabel(canvas, label, r, Colors.black, 12);
       return;
@@ -315,7 +325,11 @@ class PagePainter extends CustomPainter {
     if (tag == 'select') {
       final rect = ui.Rect.fromLTWH(r.x, r.y, r.width, r.height);
       canvas.drawRect(rect, Paint()..color = Colors.white);
-      canvas.drawRect(rect, Paint()..color = Colors.grey..style = PaintingStyle.stroke..strokeWidth = 1);
+      canvas.drawRect(rect, Paint()..color = box.formFocused ? Colors.blue : Colors.grey..style = PaintingStyle.stroke..strokeWidth = 1);
+      // Draw current value.
+      if (box.formValue?.isNotEmpty == true) {
+        _drawLabel(canvas, box.formValue!, r, Colors.black, 12);
+      }
       final arrowX = r.x + r.width - 16;
       final arrowY = r.y + r.height / 2;
       final path = Path()
@@ -330,9 +344,15 @@ class PagePainter extends CustomPainter {
     if (tag == 'textarea') {
       final rect = ui.Rect.fromLTWH(r.x, r.y, r.width, r.height);
       canvas.drawRect(rect, Paint()..color = Colors.white);
-      canvas.drawRect(rect, Paint()..color = Colors.grey..style = PaintingStyle.stroke..strokeWidth = 1);
-      if (box.formPlaceholder?.isNotEmpty == true) {
-        _drawLabel(canvas, box.formPlaceholder!, r, Colors.grey, 12);
+      canvas.drawRect(rect, Paint()..color = box.formFocused ? Colors.blue : Colors.grey..style = PaintingStyle.stroke..strokeWidth = 1);
+      final displayText = box.formValue?.isNotEmpty == true
+          ? box.formValue!
+          : box.formPlaceholder ?? '';
+      final displayColor = box.formValue?.isNotEmpty == true
+          ? Colors.black
+          : Colors.grey;
+      if (displayText.isNotEmpty) {
+        _drawLabel(canvas, displayText, r, displayColor, 12);
       }
       return;
     }
@@ -393,9 +413,15 @@ class PagePainter extends CustomPainter {
     // Default: text input.
     final rect = ui.Rect.fromLTWH(r.x, r.y, r.width, r.height);
     canvas.drawRect(rect, Paint()..color = Colors.white);
-    canvas.drawRect(rect, Paint()..color = Colors.grey..style = PaintingStyle.stroke..strokeWidth = 1);
-    if (box.formPlaceholder?.isNotEmpty == true) {
-      _drawLabel(canvas, box.formPlaceholder!, r, Colors.grey.shade400, 12);
+    canvas.drawRect(rect, Paint()..color = box.formFocused ? Colors.blue : Colors.grey..style = PaintingStyle.stroke..strokeWidth = box.formFocused ? 2 : 1);
+    final displayText = box.formValue?.isNotEmpty == true
+        ? box.formValue!
+        : box.formPlaceholder ?? '';
+    final displayColor = box.formValue?.isNotEmpty == true
+        ? Colors.black
+        : Colors.grey.shade400;
+    if (displayText.isNotEmpty) {
+      _drawLabel(canvas, displayText, r, displayColor, 12);
     }
   }
 

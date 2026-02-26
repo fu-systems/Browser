@@ -90,11 +90,18 @@ class LayoutBox {
   double imageWidth = 0;
   double imageHeight = 0;
 
-  /// For form elements: tag + type info for painting.
+  /// For form elements: tag + type info for painting and interaction.
   String? formTag;
   String? formType;
   String? formValue;
   String? formPlaceholder;
+  String? formName;
+  String? formAction;
+  String? formMethod;
+  bool formChecked = false;
+  bool formFocused = false;
+  List<String>? formOptions;       // For <select>: option labels
+  List<String>? formOptionValues;  // For <select>: option values
 
   /// Positioning data.
   String position = 'static';  // static, relative, absolute, fixed, sticky
@@ -213,7 +220,7 @@ LayoutBox _buildLayoutTree(StyledNode styled, String? parentHref) {
     }
   }
 
-  // Form elements -> display-only boxes.
+  // Form elements -> interactive boxes.
   if (styled.node is Element) {
     final el = styled.node as Element;
     final tag = el.tagName;
@@ -225,6 +232,40 @@ LayoutBox _buildLayoutTree(StyledNode styled, String? parentHref) {
       box.formType = el.attributes['type'] ?? (tag == 'button' ? 'button' : 'text');
       box.formValue = el.attributes['value'] ?? el.textContent;
       box.formPlaceholder = el.attributes['placeholder'] ?? '';
+      box.formName = el.attributes['name'] ?? '';
+      box.formChecked = el.attributes.containsKey('checked');
+
+      // Find parent <form> action/method.
+      Node? ancestor = el.parent;
+      while (ancestor != null) {
+        if (ancestor is Element && ancestor.tagName == 'form') {
+          box.formAction = ancestor.attributes['action'] ?? '';
+          box.formMethod = (ancestor.attributes['method'] ?? 'GET').toUpperCase();
+          break;
+        }
+        ancestor = ancestor.parent;
+      }
+
+      // For <select>: extract <option> children.
+      if (tag == 'select') {
+        final options = <String>[];
+        final optionValues = <String>[];
+        for (final child in el.children) {
+          if (child is Element && child.tagName == 'option') {
+            options.add(child.textContent.trim());
+            optionValues.add(child.attributes['value'] ?? child.textContent.trim());
+            if (child.attributes.containsKey('selected') && box.formValue!.isEmpty) {
+              box.formValue = child.textContent.trim();
+            }
+          }
+        }
+        box.formOptions = options;
+        box.formOptionValues = optionValues;
+        if (box.formValue!.isEmpty && options.isNotEmpty) {
+          box.formValue = options.first;
+        }
+      }
+
       _applyVisualProperties(box, styled);
       return box;
     }

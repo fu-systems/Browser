@@ -64,6 +64,11 @@ class _BrowserShellState extends State<BrowserShell> {
   Offset? _selectionEnd;
   String _selectedText = '';
 
+  // Form interaction state.
+  engine.LayoutBox? _activeFormBox;
+  final TextEditingController _formInputController = TextEditingController();
+  final FocusNode _formInputFocus = FocusNode();
+
   tab_model.Tab get _activeTab => _tabs[_activeTabIndex];
 
   @override
@@ -72,6 +77,8 @@ class _BrowserShellState extends State<BrowserShell> {
     _addressFocus.dispose();
     _findController.dispose();
     _findFocus.dispose();
+    _formInputController.dispose();
+    _formInputFocus.dispose();
     super.dispose();
   }
 
@@ -106,6 +113,7 @@ class _BrowserShellState extends State<BrowserShell> {
   }
 
   Future<void> _loadPage(String url) async {
+    _dismissFormInput();
     setState(() {
       _activeTab.isLoading = true;
       _activeTab.errorMessage = null;
@@ -183,23 +191,27 @@ class _BrowserShellState extends State<BrowserShell> {
 
       // 4b. Execute JavaScript if enabled.
       if (sm != null && sm.hasPendingScripts) {
-        if (_activeTab.scriptMode == ScriptMode.runAll) {
-          final result = sm.executeAll(document);
-          _activeTab.scriptLog = result.log.toList();
-          if (result.pendingNavigation != null) {
-            // Script wants to redirect — schedule it after rendering.
-            Future.microtask(() => _navigate(result.pendingNavigation!));
-          }
-        } else if (_activeTab.scriptMode == ScriptMode.askEach) {
-          // Show approval dialog (pauses pipeline).
-          if (mounted) {
-            await showScriptApprovalDialog(context, sm.pendingScripts);
-            final result = sm.executeApproved(document);
+        try {
+          if (_activeTab.scriptMode == ScriptMode.runAll) {
+            final result = sm.executeAll(document);
             _activeTab.scriptLog = result.log.toList();
             if (result.pendingNavigation != null) {
+              // Script wants to redirect — schedule it after rendering.
               Future.microtask(() => _navigate(result.pendingNavigation!));
             }
+          } else if (_activeTab.scriptMode == ScriptMode.askEach) {
+            // Show approval dialog (pauses pipeline).
+            if (mounted) {
+              await showScriptApprovalDialog(context, sm.pendingScripts);
+              final result = sm.executeApproved(document);
+              _activeTab.scriptLog = result.log.toList();
+              if (result.pendingNavigation != null) {
+                Future.microtask(() => _navigate(result.pendingNavigation!));
+              }
+            }
           }
+        } catch (e) {
+          _activeTab.scriptLog = ['Script execution error: $e'];
         }
       }
 
@@ -398,16 +410,29 @@ class _BrowserShellState extends State<BrowserShell> {
     });
   }
 
-  // ── Link hit testing ────────────────────────────────────────────
+  // ── Hit testing (links + form elements) ─────────────────────────
 
   void _onTapPage(Offset position) {
     if (_activeTab.layoutRoot == null) return;
 
     final adjustedY = position.dy + _activeTab.scrollOffset;
+
+    // First check for form element hits.
+    final formBox = _hitTestFormElement(_activeTab.layoutRoot!, position.dx, adjustedY);
+    if (formBox != null) {
+      _onFormElementTap(formBox);
+      return;
+    }
+
+    // Then check for link hits.
     final href = _hitTestLink(_activeTab.layoutRoot!, position.dx, adjustedY);
     if (href != null) {
       _onLinkTap(href);
+      return;
     }
+
+    // Tapped on empty space — dismiss active form input.
+    _dismissFormInput();
   }
 
   String? _hitTestLink(engine.LayoutBox box, double x, double y) {
@@ -416,7 +441,7 @@ class _BrowserShellState extends State<BrowserShell> {
       if (result != null) return result;
     }
 
-    if (box.linkHref != null && box.linkHref!.isNotEmpty) {
+    if (box.linkHref != null && box.linkHref!.isNotEmpty && box.formTag == null) {
       final r = box.content;
       if (x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height) {
         return box.linkHref;
@@ -424,6 +449,246 @@ class _BrowserShellState extends State<BrowserShell> {
     }
 
     return null;
+  }
+
+  engine.LayoutBox? _hitTestFormElement(engine.LayoutBox box, double x, double y) {
+    for (final child in box.children.reversed) {
+      final result = _hitTestFormElement(child, x, y);
+      if (result != null) return result;
+    }
+
+    if (box.formTag != null) {
+      final r = box.content;
+      if (x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height) {
+        return box;
+      }
+    }
+
+    return null;
+  }
+
+  // ── Form element interaction ──────────────────────────────────
+
+  void _onFormElementTap(engine.LayoutBox box) {
+    final tag = box.formTag!;
+    final type = box.formType ?? 'text';
+
+    if (type == 'hidden') return;
+
+    // Checkbox: toggle checked state.
+    if (type == 'checkbox') {
+      setState(() {
+        box.formChecked = !box.formChecked;
+      });
+      return;
+    }
+
+    // Radio: select this one and deselect siblings with same name.
+    if (type == 'radio') {
+      setState(() {
+        if (box.formName != null && box.formName!.isNotEmpty && _activeTab.layoutRoot != null) {
+          for (final other in _activeTab.layoutRoot!.allBoxes) {
+            if (other.formType == 'radio' && other.formName == box.formName) {
+              other.formChecked = false;
+            }
+          }
+        }
+        box.formChecked = true;
+      });
+      return;
+    }
+
+    // Button/submit: trigger form submission.
+    if (tag == 'button' || type == 'submit' || type == 'button') {
+      _submitForm(box);
+      return;
+    }
+
+    // Reset button: reset form fields.
+    if (type == 'reset') {
+      _resetForm(box);
+      return;
+    }
+
+    // Select dropdown: show selection dialog.
+    if (tag == 'select') {
+      _showSelectDialog(box);
+      return;
+    }
+
+    // Text input / textarea: activate inline editing.
+    if (tag == 'textarea' ||
+        type == 'text' || type == 'search' || type == 'email' ||
+        type == 'password' || type == 'url' || type == 'tel' ||
+        type == 'number') {
+      _activateFormInput(box);
+      return;
+    }
+  }
+
+  void _activateFormInput(engine.LayoutBox box) {
+    setState(() {
+      // Deactivate previous.
+      _activeFormBox?.formFocused = false;
+      _activeFormBox = box;
+      box.formFocused = true;
+      _formInputController.text = box.formValue ?? '';
+      _formInputController.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: _formInputController.text.length,
+      );
+    });
+    _formInputFocus.requestFocus();
+  }
+
+  void _dismissFormInput() {
+    if (_activeFormBox != null) {
+      setState(() {
+        _activeFormBox!.formFocused = false;
+        _activeFormBox = null;
+      });
+    }
+  }
+
+  void _onFormInputChanged(String value) {
+    if (_activeFormBox != null) {
+      setState(() {
+        _activeFormBox!.formValue = value;
+      });
+    }
+  }
+
+  void _onFormInputSubmitted(String value) {
+    if (_activeFormBox != null) {
+      _activeFormBox!.formValue = value;
+      // Move to next form field or submit.
+      final nextField = _findNextFormField(_activeFormBox!);
+      if (nextField != null) {
+        _activateFormInput(nextField);
+      } else {
+        _dismissFormInput();
+        _submitForm(_activeFormBox!);
+      }
+    }
+  }
+
+  engine.LayoutBox? _findNextFormField(engine.LayoutBox current) {
+    if (_activeTab.layoutRoot == null) return null;
+    final allFields = _activeTab.layoutRoot!.allBoxes
+        .where((b) => b.formTag != null && _isTextInput(b))
+        .toList();
+    final idx = allFields.indexOf(current);
+    if (idx >= 0 && idx < allFields.length - 1) {
+      return allFields[idx + 1];
+    }
+    return null;
+  }
+
+  bool _isTextInput(engine.LayoutBox box) {
+    final tag = box.formTag;
+    final type = box.formType ?? 'text';
+    return tag == 'textarea' ||
+        (tag == 'input' && const {'text', 'search', 'email', 'password', 'url', 'tel', 'number'}.contains(type));
+  }
+
+  void _showSelectDialog(engine.LayoutBox box) {
+    final options = box.formOptions ?? [];
+    final values = box.formOptionValues ?? [];
+    if (options.isEmpty) return;
+
+    showDialog<int>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Select an option'),
+        children: [
+          for (int i = 0; i < options.length; i++)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx, i),
+              child: Row(
+                children: [
+                  Icon(
+                    box.formValue == options[i]
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                    size: 18,
+                    color: box.formValue == options[i]
+                        ? Theme.of(context).primaryColor
+                        : Colors.grey,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(options[i]),
+                ],
+              ),
+            ),
+        ],
+      ),
+    ).then((idx) {
+      if (idx != null && idx < options.length) {
+        setState(() {
+          box.formValue = options[idx];
+        });
+      }
+    });
+  }
+
+  void _submitForm(engine.LayoutBox triggerBox) {
+    if (_activeTab.layoutRoot == null) return;
+
+    // Collect all form fields.
+    final fields = <String, String>{};
+    for (final box in _activeTab.layoutRoot!.allBoxes) {
+      if (box.formTag == null || box.formName == null || box.formName!.isEmpty) continue;
+      final type = box.formType ?? 'text';
+      if (type == 'submit' || type == 'button' || type == 'reset') continue;
+
+      if (type == 'checkbox' || type == 'radio') {
+        if (box.formChecked) {
+          fields[box.formName!] = box.formValue ?? 'on';
+        }
+      } else {
+        fields[box.formName!] = box.formValue ?? '';
+      }
+    }
+
+    // Find form action URL.
+    String? action = triggerBox.formAction;
+    String method = triggerBox.formMethod ?? 'GET';
+
+    if (action == null || action.isEmpty) {
+      action = _activeTab.url; // Submit to current page.
+    }
+
+    final resolvedAction = Fetcher.resolveUrl(_activeTab.url, action);
+
+    if (method == 'GET') {
+      // Append query parameters.
+      final uri = Uri.parse(resolvedAction);
+      final newUri = uri.replace(queryParameters: fields.isEmpty ? null : fields);
+      _navigate(newUri.toString());
+    } else {
+      // POST: navigate with form data as query (simplified).
+      final uri = Uri.parse(resolvedAction);
+      final queryStr = fields.entries
+          .map((e) => '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}')
+          .join('&');
+      final postUrl = queryStr.isNotEmpty ? '$resolvedAction?$queryStr' : resolvedAction;
+      _navigate(postUrl);
+    }
+  }
+
+  void _resetForm(engine.LayoutBox triggerBox) {
+    if (_activeTab.layoutRoot == null) return;
+    setState(() {
+      for (final box in _activeTab.layoutRoot!.allBoxes) {
+        if (box.formTag == null) continue;
+        final type = box.formType ?? 'text';
+        if (type == 'checkbox' || type == 'radio') {
+          box.formChecked = false;
+        } else if (box.formTag == 'input' || box.formTag == 'textarea') {
+          box.formValue = '';
+        }
+      }
+    });
   }
 
   // ── Text selection ──────────────────────────────────────────────
@@ -1349,6 +1614,73 @@ class _BrowserShellState extends State<BrowserShell> {
                       ),
                     ),
                   ),
+                ),
+              ),
+            // Floating text input for form fields.
+            if (_activeFormBox != null && _isTextInput(_activeFormBox!))
+              Positioned(
+                left: _activeFormBox!.content.x,
+                top: _activeFormBox!.content.y - _activeTab.scrollOffset,
+                width: _activeFormBox!.content.width,
+                height: _activeFormBox!.formTag == 'textarea'
+                    ? _activeFormBox!.content.height
+                    : _activeFormBox!.content.height,
+                child: Material(
+                  elevation: 2,
+                  borderRadius: BorderRadius.circular(2),
+                  child: _activeFormBox!.formTag == 'textarea'
+                      ? TextField(
+                          controller: _formInputController,
+                          focusNode: _formInputFocus,
+                          maxLines: null,
+                          expands: true,
+                          style: const TextStyle(fontSize: 12),
+                          decoration: InputDecoration(
+                            contentPadding: const EdgeInsets.all(4),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(2),
+                              borderSide: const BorderSide(color: Colors.blue),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(2),
+                              borderSide: const BorderSide(color: Colors.blue, width: 2),
+                            ),
+                            isDense: true,
+                            hintText: _activeFormBox!.formPlaceholder,
+                            hintStyle: const TextStyle(fontSize: 12, color: Colors.grey),
+                          ),
+                          onChanged: _onFormInputChanged,
+                        )
+                      : TextField(
+                          controller: _formInputController,
+                          focusNode: _formInputFocus,
+                          obscureText: _activeFormBox!.formType == 'password',
+                          keyboardType: _activeFormBox!.formType == 'number'
+                              ? TextInputType.number
+                              : _activeFormBox!.formType == 'email'
+                                  ? TextInputType.emailAddress
+                                  : _activeFormBox!.formType == 'url'
+                                      ? TextInputType.url
+                                      : TextInputType.text,
+                          style: const TextStyle(fontSize: 12),
+                          decoration: InputDecoration(
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(2),
+                              borderSide: const BorderSide(color: Colors.blue),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(2),
+                              borderSide: const BorderSide(color: Colors.blue, width: 2),
+                            ),
+                            isDense: true,
+                            hintText: _activeFormBox!.formPlaceholder,
+                            hintStyle: const TextStyle(fontSize: 12, color: Colors.grey),
+                          ),
+                          onChanged: _onFormInputChanged,
+                          onSubmitted: _onFormInputSubmitted,
+                          textInputAction: TextInputAction.next,
+                        ),
                 ),
               ),
             if (_selectedText.isNotEmpty)

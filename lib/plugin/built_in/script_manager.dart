@@ -149,20 +149,42 @@ class ScriptManagerPlugin extends Plugin {
 
   /// Execute all pending scripts (for [ScriptMode.runAll]).
   ScriptResult executeAll(Document document) {
-    final engine = ScriptEngine(
-      document: document,
-      blockTransmit: isTransmitBlocked,
-    );
+    try {
+      final engine = ScriptEngine(
+        document: document,
+        blockTransmit: isTransmitBlocked,
+      );
 
-    ScriptResult? lastResult;
-    for (final script in pendingScripts) {
-      if (script.content.isNotEmpty) {
-        lastResult = engine.execute(script.content);
+      final allLog = <String>[];
+      final allAlerts = <String>[];
+      final allSkipped = <String>[];
+      String? nav;
+      bool modified = false;
+
+      for (final script in pendingScripts) {
+        if (script.content.isNotEmpty) {
+          final result = engine.execute(script.content);
+          allLog.addAll(result.log);
+          allAlerts.addAll(result.alerts);
+          allSkipped.addAll(result.skipped);
+          nav ??= result.pendingNavigation;
+          if (result.domModified) modified = true;
+        }
       }
-    }
 
-    lastLog = lastResult?.log ?? [];
-    return lastResult ?? const ScriptResult();
+      lastLog = allLog;
+      return ScriptResult(
+        log: allLog,
+        alerts: allAlerts,
+        pendingNavigation: nav,
+        domModified: modified,
+        skipped: allSkipped,
+      );
+    } catch (e) {
+      PaneLogger.warn('script_manager', 'executeAll error: $e');
+      lastLog = ['Script execution error: $e'];
+      return const ScriptResult();
+    }
   }
 
   /// Execute only approved scripts (for [ScriptMode.askEach]).
@@ -170,20 +192,42 @@ class ScriptManagerPlugin extends Plugin {
     final approved = pendingScripts.where((s) => s.approved).toList();
     if (approved.isEmpty) return const ScriptResult();
 
-    final engine = ScriptEngine(
-      document: document,
-      blockTransmit: isTransmitBlocked,
-    );
+    try {
+      final engine = ScriptEngine(
+        document: document,
+        blockTransmit: isTransmitBlocked,
+      );
 
-    ScriptResult? lastResult;
-    for (final script in approved) {
-      if (script.content.isNotEmpty) {
-        lastResult = engine.execute(script.content);
+      final allLog = <String>[];
+      final allAlerts = <String>[];
+      final allSkipped = <String>[];
+      String? nav;
+      bool modified = false;
+
+      for (final script in approved) {
+        if (script.content.isNotEmpty) {
+          final result = engine.execute(script.content);
+          allLog.addAll(result.log);
+          allAlerts.addAll(result.alerts);
+          allSkipped.addAll(result.skipped);
+          nav ??= result.pendingNavigation;
+          if (result.domModified) modified = true;
+        }
       }
-    }
 
-    lastLog = lastResult?.log ?? [];
-    return lastResult ?? const ScriptResult();
+      lastLog = allLog;
+      return ScriptResult(
+        log: allLog,
+        alerts: allAlerts,
+        pendingNavigation: nav,
+        domModified: modified,
+        skipped: allSkipped,
+      );
+    } catch (e) {
+      PaneLogger.warn('script_manager', 'executeApproved error: $e');
+      lastLog = ['Script execution error: $e'];
+      return const ScriptResult();
+    }
   }
 
   // ── Internals ─────────────────────────────────────────────────

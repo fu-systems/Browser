@@ -54,13 +54,21 @@ class ScriptEngine {
 
   /// Execute [source] against the document and return results.
   ScriptResult execute(String source) {
-    final cleaned = _stripComments(source);
-    final stmts = _splitStatements(cleaned);
+    try {
+      final cleaned = _stripComments(source);
+      final stmts = _splitStatements(cleaned);
 
-    for (final stmt in stmts) {
-      final s = stmt.trim();
-      if (s.isEmpty) continue;
-      _executeStatement(s);
+      for (final stmt in stmts) {
+        final s = stmt.trim();
+        if (s.isEmpty) continue;
+        try {
+          _executeStatement(s);
+        } catch (e) {
+          _skipped.add('Error: $e in: ${_truncate(s, 60)}');
+        }
+      }
+    } catch (e) {
+      _skipped.add('Script parse error: $e');
     }
 
     return ScriptResult(
