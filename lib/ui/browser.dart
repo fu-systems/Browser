@@ -19,21 +19,25 @@ import '../plugin/plugin.dart';
 import '../plugin/plugin_pipeline.dart';
 import '../plugin/built_in/cookie_manager.dart';
 import '../plugin/built_in/identity_manager.dart';
+import '../plugin/built_in/script_manager.dart';
 import 'flutter_text_measurer.dart';
 import 'identity_editor.dart';
 import 'page_painter.dart';
+import 'script_approval_dialog.dart';
 import 'tab.dart' as tab_model;
 
 class BrowserShell extends StatefulWidget {
   final PluginPipeline? pluginPipeline;
   final CookieManagerPlugin? cookieManager;
   final IdentityManagerPlugin? identityManager;
+  final ScriptManagerPlugin? scriptManager;
 
   const BrowserShell({
     super.key,
     this.pluginPipeline,
     this.cookieManager,
     this.identityManager,
+    this.scriptManager,
   });
 
   @override
@@ -113,6 +117,14 @@ class _BrowserShellState extends State<BrowserShell> {
     // Sync cookie plugin state with active tab's toggle.
     widget.cookieManager?.cookiesEnabled = _activeTab.cookiesEnabled;
 
+    // Sync script manager state with active tab's settings.
+    final sm = widget.scriptManager;
+    if (sm != null) {
+      sm.currentMode = _activeTab.scriptMode;
+      sm.currentTransmitMode = _activeTab.scriptTransmitMode;
+      sm.blockSubsequentRequests = false; // Allow initial page load.
+    }
+
     try {
       // 1. Build a FetchRequest and run onBeforeRequest hooks.
       FetchResponse response;
@@ -166,7 +178,30 @@ class _BrowserShellState extends State<BrowserShell> {
       final document = HtmlParser.parse(htmlBody);
 
       // 4. Run onDomReady hooks (plugins can inject/remove DOM nodes).
+      //    Script manager extracts <script> tags here.
       pipeline?.runDomReady(document);
+
+      // 4b. Execute JavaScript if enabled.
+      if (sm != null && sm.hasPendingScripts) {
+        if (_activeTab.scriptMode == ScriptMode.runAll) {
+          final result = sm.executeAll(document);
+          _activeTab.scriptLog = result.log.toList();
+          if (result.pendingNavigation != null) {
+            // Script wants to redirect — schedule it after rendering.
+            Future.microtask(() => _navigate(result.pendingNavigation!));
+          }
+        } else if (_activeTab.scriptMode == ScriptMode.askEach) {
+          // Show approval dialog (pauses pipeline).
+          if (mounted) {
+            await showScriptApprovalDialog(context, sm.pendingScripts);
+            final result = sm.executeApproved(document);
+            _activeTab.scriptLog = result.log.toList();
+            if (result.pendingNavigation != null) {
+              Future.microtask(() => _navigate(result.pendingNavigation!));
+            }
+          }
+        }
+      }
 
       // 5. Extract and parse CSS.
       final stylesheets = <css.Stylesheet>[];
@@ -218,6 +253,13 @@ class _BrowserShellState extends State<BrowserShell> {
 
       // 11. Fetch images in background.
       _fetchImages(layoutRoot, resolvedUrl);
+
+      // 12. Activate transmission blocking if enabled.
+      if (sm != null &&
+          _activeTab.scriptTransmitMode == TransmitMode.blocked &&
+          _activeTab.scriptMode != ScriptMode.off) {
+        sm.blockSubsequentRequests = true;
+      }
     } catch (e, stack) {
       PaneLogger.error('loadPage($url)', e, stack);
       setState(() {
@@ -797,6 +839,10 @@ class _BrowserShellState extends State<BrowserShell> {
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(maxWidth: 36),
           ),
+          if (widget.scriptManager != null) ...[
+            const SizedBox(width: 2),
+            _buildScriptModeButton(),
+          ],
           if (widget.identityManager != null) ...[
             const SizedBox(width: 2),
             _buildIdentityButton(),
@@ -805,6 +851,180 @@ class _BrowserShellState extends State<BrowserShell> {
             const SizedBox(width: 2),
             _buildCookieToggle(),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScriptModeButton() {
+    final mode = _activeTab.scriptMode;
+    final transmit = _activeTab.scriptTransmitMode;
+    final isOn = mode != ScriptMode.off;
+    final sm = widget.scriptManager!;
+    final scriptCount = sm.pendingScripts.length;
+
+    Color bgColor;
+    Color fgColor;
+    Color borderColor;
+    switch (mode) {
+      case ScriptMode.off:
+        bgColor = const Color(0xFFF5F5F5);
+        fgColor = Colors.grey.shade600;
+        borderColor = Colors.grey.shade400;
+      case ScriptMode.runAll:
+        bgColor = const Color(0xFFE8F5E9);
+        fgColor = const Color(0xFF2E7D32);
+        borderColor = const Color(0xFF66BB6A);
+      case ScriptMode.askEach:
+        bgColor = const Color(0xFFFFF3E0);
+        fgColor = const Color(0xFFE65100);
+        borderColor = const Color(0xFFFFB74D);
+    }
+
+    return PopupMenuButton<String>(
+      offset: const Offset(0, 34),
+      tooltip: 'JavaScript execution mode',
+      onSelected: (value) {
+        setState(() {
+          switch (value) {
+            case 'off':
+              _activeTab.scriptMode = ScriptMode.off;
+            case 'all':
+              _activeTab.scriptMode = ScriptMode.runAll;
+            case 'ask':
+              _activeTab.scriptMode = ScriptMode.askEach;
+            case 'toggle_transmit':
+              _activeTab.scriptTransmitMode =
+                  transmit == TransmitMode.normal
+                      ? TransmitMode.blocked
+                      : TransmitMode.normal;
+          }
+        });
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          enabled: false,
+          height: 28,
+          child: Text('JavaScript Mode',
+              style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey.shade600)),
+        ),
+        _modeItem('off', 'Don\'t Run JavaScript', ScriptMode.off, mode),
+        _modeItem('all', 'Run All JavaScript', ScriptMode.runAll, mode),
+        _modeItem('ask', 'Ask for Each Script', ScriptMode.askEach, mode),
+        if (isOn) ...[
+          const PopupMenuDivider(),
+          PopupMenuItem(
+            enabled: false,
+            height: 28,
+            child: Text('Data Transmission',
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey.shade600)),
+          ),
+          PopupMenuItem(
+            value: 'toggle_transmit',
+            height: 36,
+            child: Row(
+              children: [
+                Icon(
+                  transmit == TransmitMode.normal
+                      ? Icons.cloud_upload_outlined
+                      : Icons.cloud_off_outlined,
+                  size: 16,
+                  color: transmit == TransmitMode.blocked
+                      ? Colors.red.shade400
+                      : Colors.grey.shade700,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  transmit == TransmitMode.normal
+                      ? 'Allow outbound data'
+                      : 'Block outbound data',
+                  style: const TextStyle(fontSize: 13),
+                ),
+                const Spacer(),
+                if (transmit == TransmitMode.blocked)
+                  Icon(Icons.check, size: 16, color: Colors.red.shade400),
+              ],
+            ),
+          ),
+        ],
+        if (scriptCount > 0) ...[
+          const PopupMenuDivider(),
+          PopupMenuItem(
+            enabled: false,
+            height: 28,
+            child: Text(
+              '$scriptCount script${scriptCount == 1 ? '' : 's'} detected',
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+            ),
+          ),
+        ],
+      ],
+      child: Container(
+        height: 26,
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: borderColor, width: 0.5),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'JS',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: fgColor,
+              ),
+            ),
+            const SizedBox(width: 2),
+            Text(
+              mode.label,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+                color: fgColor,
+              ),
+            ),
+            if (isOn && transmit == TransmitMode.blocked) ...[
+              const SizedBox(width: 3),
+              Icon(Icons.cloud_off, size: 12, color: Colors.red.shade400),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  PopupMenuItem<String> _modeItem(
+    String value,
+    String label,
+    ScriptMode itemMode,
+    ScriptMode current,
+  ) {
+    return PopupMenuItem(
+      value: value,
+      height: 36,
+      child: Row(
+        children: [
+          Icon(
+            itemMode == current
+                ? Icons.radio_button_checked
+                : Icons.radio_button_unchecked,
+            size: 16,
+            color: itemMode == current
+                ? Theme.of(context).primaryColor
+                : Colors.grey.shade400,
+          ),
+          const SizedBox(width: 8),
+          Text(label, style: const TextStyle(fontSize: 13)),
         ],
       ),
     );

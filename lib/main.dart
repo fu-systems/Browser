@@ -7,6 +7,7 @@ import 'plugin/built_in/cookie_manager.dart';
 import 'plugin/built_in/dark_mode.dart';
 import 'plugin/built_in/identity_manager.dart';
 import 'plugin/built_in/privacy_shield.dart';
+import 'plugin/built_in/script_manager.dart';
 import 'ui/browser.dart';
 
 void main() {
@@ -48,7 +49,6 @@ void main() {
       capabilities: {PluginCapability.network, PluginCapability.cookies},
     ),
   );
-  // Cookie manager is always enabled — gated by the per-tab toggle.
   registry.enable('cookie_manager');
 
   final identityManager = IdentityManagerPlugin();
@@ -62,8 +62,20 @@ void main() {
       capabilities: {PluginCapability.network, PluginCapability.headers},
     ),
   );
-  // Identity manager is always enabled — controlled via profile selection.
   registry.enable('identity_manager');
+
+  final scriptManager = ScriptManagerPlugin();
+  registry.register(
+    scriptManager,
+    const PluginManifest(
+      name: 'script_manager',
+      version: '1.0.0',
+      description: 'JavaScript execution control with per-script approval.',
+      author: 'Pane',
+      capabilities: {PluginCapability.dom, PluginCapability.network},
+    ),
+  );
+  registry.enable('script_manager');
 
   final pipeline = PluginPipeline(registry, context);
 
@@ -72,6 +84,7 @@ void main() {
     registry: registry,
     cookieManager: cookieManager,
     identityManager: identityManager,
+    scriptManager: scriptManager,
   ));
 }
 
@@ -80,6 +93,7 @@ class PaneApp extends StatelessWidget {
   final PluginRegistry registry;
   final CookieManagerPlugin cookieManager;
   final IdentityManagerPlugin identityManager;
+  final ScriptManagerPlugin scriptManager;
 
   const PaneApp({
     super.key,
@@ -87,6 +101,7 @@ class PaneApp extends StatelessWidget {
     required this.registry,
     required this.cookieManager,
     required this.identityManager,
+    required this.scriptManager,
   });
 
   @override
@@ -105,6 +120,7 @@ class PaneApp extends StatelessWidget {
         pluginPipeline: pipeline,
         cookieManager: cookieManager,
         identityManager: identityManager,
+        scriptManager: scriptManager,
       ),
     );
   }

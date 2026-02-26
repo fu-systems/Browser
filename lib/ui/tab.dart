@@ -5,6 +5,7 @@
 
 import 'dart:ui' as ui;
 import '../engine/layout.dart';
+import '../plugin/built_in/script_manager.dart';
 
 class Tab {
   String url;
@@ -30,6 +31,15 @@ class Tab {
 
   /// Cookie toggle — per-tab, default off.
   bool cookiesEnabled = false;
+
+  /// JavaScript execution mode — per-tab, default off.
+  ScriptMode scriptMode = ScriptMode.off;
+
+  /// JavaScript outbound data transmission — per-tab.
+  TransmitMode scriptTransmitMode = TransmitMode.normal;
+
+  /// Execution log from the last script run on this tab.
+  List<String> scriptLog = [];
 
   Tab({this.url = '', this.title = 'New Tab'});
 
