@@ -166,6 +166,18 @@ class HtmlParser {
 
       // Check for opening tag.
       if (_current == '<' && _peek(1) != '' && _peek(1) != ' ') {
+        // Peek at the tag name to check if it should auto-close the parent.
+        if (parentTag != null && !_startsWith('</') && !_startsWith('<!')) {
+          final saved = _pos;
+          _advance(); // skip <
+          final peekedTag = _consumeWhile(
+            (c) => c != '>' && c != '/' && !_isWhitespace(c),
+          ).toLowerCase();
+          _pos = saved; // restore position
+          if (peekedTag.isNotEmpty && _shouldAutoClose(parentTag, peekedTag)) {
+            break; // Auto-close parent; let the grandparent handle this tag.
+          }
+        }
         final element = _parseElement();
         if (element != null) {
           nodes.add(element);
@@ -188,9 +200,45 @@ class HtmlParser {
     const structural = {
       'html', 'head', 'body', 'div', 'section', 'article',
       'main', 'nav', 'aside', 'header', 'footer', 'table',
-      'ul', 'ol', 'dl', 'form', 'fieldset',
+      'ul', 'ol', 'dl', 'form', 'fieldset', 'select',
+      'details', 'dialog', 'menu', 'blockquote', 'figure',
     };
     return structural.contains(closing);
+  }
+
+  /// HTML spec: certain tags implicitly close their parent when opened.
+  bool _shouldAutoClose(String parent, String child) {
+    switch (parent) {
+      case 'p':
+        // <p> auto-closes when a block element opens inside it.
+        return blockElements.contains(child) || child == 'p';
+      case 'li':
+        return child == 'li';
+      case 'td':
+        return child == 'td' || child == 'th';
+      case 'th':
+        return child == 'td' || child == 'th';
+      case 'dt':
+        return child == 'dt' || child == 'dd';
+      case 'dd':
+        return child == 'dt' || child == 'dd';
+      case 'tr':
+        return child == 'tr';
+      case 'thead':
+        return child == 'tbody' || child == 'tfoot';
+      case 'tbody':
+        return child == 'thead' || child == 'tbody' || child == 'tfoot';
+      case 'tfoot':
+        return child == 'thead' || child == 'tbody';
+      case 'option':
+        return child == 'option' || child == 'optgroup';
+      case 'optgroup':
+        return child == 'optgroup';
+      case 'head':
+        return child == 'body';
+      default:
+        return false;
+    }
   }
 
   Text _parseText() {
@@ -342,23 +390,73 @@ class HtmlParser {
     return attrs;
   }
 
+  /// Named HTML entities → Unicode code points.
+  static const _namedEntities = <String, String>{
+    // XML predefined
+    'amp': '&', 'lt': '<', 'gt': '>', 'quot': '"', 'apos': "'",
+    // Whitespace / special
+    'nbsp': '\u00A0', 'ensp': '\u2002', 'emsp': '\u2003',
+    'thinsp': '\u2009', 'shy': '\u00AD',
+    'zwnj': '\u200C', 'zwj': '\u200D',
+    // Punctuation / typography
+    'mdash': '\u2014', 'ndash': '\u2013', 'hellip': '\u2026',
+    'lsquo': '\u2018', 'rsquo': '\u2019', 'sbquo': '\u201A',
+    'ldquo': '\u201C', 'rdquo': '\u201D', 'bdquo': '\u201E',
+    'laquo': '\u00AB', 'raquo': '\u00BB',
+    'bull': '\u2022', 'middot': '\u00B7',
+    'prime': '\u2032', 'Prime': '\u2033',
+    // Symbols
+    'copy': '\u00A9', 'reg': '\u00AE', 'trade': '\u2122',
+    'times': '\u00D7', 'divide': '\u00F7',
+    'plusmn': '\u00B1', 'minus': '\u2212',
+    'deg': '\u00B0', 'micro': '\u00B5', 'permil': '\u2030',
+    // Fractions
+    'frac14': '\u00BC', 'frac12': '\u00BD', 'frac34': '\u00BE',
+    // Currency
+    'euro': '\u20AC', 'pound': '\u00A3', 'yen': '\u00A5', 'cent': '\u00A2',
+    'curren': '\u00A4',
+    // Typographic marks
+    'sect': '\u00A7', 'para': '\u00B6', 'dagger': '\u2020', 'Dagger': '\u2021',
+    'loz': '\u25CA', 'spades': '\u2660', 'clubs': '\u2663',
+    'hearts': '\u2665', 'diams': '\u2666',
+    // Arrows
+    'larr': '\u2190', 'uarr': '\u2191', 'rarr': '\u2192', 'darr': '\u2193',
+    'harr': '\u2194', 'crarr': '\u21B5',
+    // Math
+    'sum': '\u2211', 'prod': '\u220F', 'infin': '\u221E',
+    'radic': '\u221A', 'asymp': '\u2248', 'ne': '\u2260',
+    'le': '\u2264', 'ge': '\u2265',
+    'and': '\u2227', 'or': '\u2228', 'not': '\u00AC',
+    'empty': '\u2205', 'isin': '\u2208', 'notin': '\u2209',
+    'sub': '\u2282', 'sup': '\u2283',
+    // Greek (commonly used)
+    'Alpha': '\u0391', 'Beta': '\u0392', 'Gamma': '\u0393', 'Delta': '\u0394',
+    'Epsilon': '\u0395', 'Theta': '\u0398', 'Lambda': '\u039B', 'Pi': '\u03A0',
+    'Sigma': '\u03A3', 'Omega': '\u03A9',
+    'alpha': '\u03B1', 'beta': '\u03B2', 'gamma': '\u03B3', 'delta': '\u03B4',
+    'epsilon': '\u03B5', 'theta': '\u03B8', 'lambda': '\u03BB', 'mu': '\u03BC',
+    'pi': '\u03C0', 'sigma': '\u03C3', 'tau': '\u03C4', 'omega': '\u03C9',
+    // Miscellaneous
+    'iexcl': '\u00A1', 'iquest': '\u00BF', 'ordf': '\u00AA', 'ordm': '\u00BA',
+    'macr': '\u00AF', 'acute': '\u00B4', 'cedil': '\u00B8',
+    'circ': '\u02C6', 'tilde': '\u02DC',
+  };
+
   /// Decode HTML entities (named + numeric).
   String _decodeEntities(String s) {
-    return s
-        .replaceAll('&amp;', '&')
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&#39;', "'")
-        .replaceAll('&apos;', "'")
-        .replaceAll('&nbsp;', '\u00A0')
-        .replaceAllMapped(RegExp(r'&#(\d+);'), (m) {
-          final code = int.tryParse(m.group(1)!);
-          return code != null ? String.fromCharCode(code) : m.group(0)!;
-        })
-        .replaceAllMapped(RegExp(r'&#x([0-9a-fA-F]+);'), (m) {
-          final code = int.tryParse(m.group(1)!, radix: 16);
-          return code != null ? String.fromCharCode(code) : m.group(0)!;
-        });
+    return s.replaceAllMapped(RegExp(r'&(#x?[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);'), (m) {
+      final entity = m.group(1)!;
+      // Numeric: decimal &#NNN; or hex &#xHHH;
+      if (entity.startsWith('#x') || entity.startsWith('#X')) {
+        final code = int.tryParse(entity.substring(2), radix: 16);
+        return code != null ? String.fromCharCode(code) : m.group(0)!;
+      }
+      if (entity.startsWith('#')) {
+        final code = int.tryParse(entity.substring(1));
+        return code != null ? String.fromCharCode(code) : m.group(0)!;
+      }
+      // Named entity lookup.
+      return _namedEntities[entity] ?? m.group(0)!;
+    });
   }
 }

@@ -206,14 +206,34 @@ void _applyDefaults(Element element, Map<String, String> props) {
       props['color'] = '#0000EE';
       props['text-decoration'] = 'underline';
       props['cursor'] = 'pointer';
+    // ── Inline text semantics ──
     case 'strong' || 'b':
       props['font-weight'] = 'bold';
-    case 'em' || 'i':
+    case 'em' || 'i' || 'cite' || 'var' || 'dfn':
       props['font-style'] = 'italic';
-    case 'u':
+    case 'u' || 'ins':
       props['text-decoration'] = 'underline';
-    case 'code':
+    case 's' || 'del' || 'strike':
+      props['text-decoration'] = 'line-through';
+    case 'small':
+      props['font-size'] = '13px';
+    case 'big':
+      props['font-size'] = '19px';
+    case 'sub':
+      props['vertical-align'] = 'sub';
+      props['font-size'] = '13px';
+    case 'sup':
+      props['vertical-align'] = 'super';
+      props['font-size'] = '13px';
+    case 'mark':
+      props['background-color'] = '#ffff00';
+      props['color'] = '#000000';
+    case 'abbr':
+      props['text-decoration'] = 'underline dotted';
+    case 'code' || 'kbd' || 'samp':
       props['font-family'] = 'monospace';
+
+    // ── Preformatted / quoted ──
     case 'pre':
       props['font-family'] = 'monospace';
       props['white-space'] = 'pre';
@@ -223,12 +243,33 @@ void _applyDefaults(Element element, Map<String, String> props) {
       props['margin-left'] = '40px';
       props['margin-top'] = '16px';
       props['margin-bottom'] = '16px';
-    case 'ul' || 'ol':
+    case 'address':
+      props['font-style'] = 'italic';
+      props['margin-top'] = '16px';
+      props['margin-bottom'] = '16px';
+
+    // ── Lists ──
+    case 'ul':
       props['margin-top'] = '16px';
       props['margin-bottom'] = '16px';
       props['padding-left'] = '40px';
+      props['list-style-type'] = 'disc';
+    case 'ol':
+      props['margin-top'] = '16px';
+      props['margin-bottom'] = '16px';
+      props['padding-left'] = '40px';
+      props['list-style-type'] = 'decimal';
+    case 'menu':
+      props['margin-top'] = '16px';
+      props['margin-bottom'] = '16px';
+      props['padding-left'] = '40px';
+      props['list-style-type'] = 'disc';
     case 'li':
       props['display'] = 'block';
+    case 'dd':
+      props['margin-left'] = '40px';
+
+    // ── Separators / structure ──
     case 'hr':
       props['margin-top'] = '8px';
       props['margin-bottom'] = '8px';
@@ -240,6 +281,8 @@ void _applyDefaults(Element element, Map<String, String> props) {
       props.putIfAbsent('margin', () => '8px');
     case 'center':
       props['text-align'] = 'center';
+
+    // ── Legacy formatting ──
     case 'tt':
       props['font-family'] = 'monospace';
     case 'font':
@@ -251,14 +294,46 @@ void _applyDefaults(Element element, Map<String, String> props) {
       if (size != null && size.isNotEmpty) {
         props['font-size'] = _htmlFontSize(size);
       }
+      final color = element.attributes['color'];
+      if (color != null && color.isNotEmpty) {
+        props['color'] = color;
+      }
+
+    // ── Tables ──
     case 'table':
       props['display'] = 'block';
       props['border-collapse'] = 'separate';
-    case 'td' || 'th':
+    case 'td':
       props['padding'] = '1px';
     case 'th':
+      props['padding'] = '1px';
       props['font-weight'] = 'bold';
       props['text-align'] = 'center';
+    case 'caption':
+      props['text-align'] = 'center';
+
+    // ── Figures ──
+    case 'figure':
+      props['margin-top'] = '16px';
+      props['margin-bottom'] = '16px';
+      props['margin-left'] = '40px';
+      props['margin-right'] = '40px';
+
+    // ── Forms ──
+    case 'fieldset':
+      props['border'] = '2px groove #c0c0c0';
+      props['padding'] = '8px 12px 10px';
+      props['margin-left'] = '2px';
+      props['margin-right'] = '2px';
+    case 'legend':
+      props['padding-left'] = '4px';
+      props['padding-right'] = '4px';
+
+    // ── Interactive ──
+    case 'dialog':
+      props['border'] = '1px solid #000000';
+      props['padding'] = '16px';
+      props['background-color'] = '#ffffff';
   }
 
   // Apply HTML width/height attributes as presentational hints.

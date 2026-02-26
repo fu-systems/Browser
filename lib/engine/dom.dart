@@ -149,11 +149,11 @@ const ignoredElements = {'script', 'noscript', 'template'};
 /// Block-level elements (used by layout engine).
 const blockElements = {
   'html', 'body', 'article', 'section', 'nav', 'aside',
-  'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-  'p', 'div', 'main', 'header', 'footer', 'center',
-  'ul', 'ol', 'li', 'dl', 'dt', 'dd',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hgroup',
+  'p', 'div', 'main', 'header', 'footer', 'center', 'address',
+  'ul', 'ol', 'li', 'dl', 'dt', 'dd', 'menu',
   'blockquote', 'pre', 'figure', 'figcaption',
-  'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'caption',
+  'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'caption', 'colgroup',
   'form', 'fieldset', 'legend',
-  'details', 'summary', 'hr',
+  'details', 'summary', 'dialog', 'search', 'hr',
 };

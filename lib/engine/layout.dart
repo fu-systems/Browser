@@ -173,11 +173,29 @@ LayoutBox _buildLayoutTree(StyledNode styled, String? parentHref) {
     return box;
   }
 
+  // Embedded/media elements → inline-replaced boxes (video, audio, iframe, etc.).
+  if (styled.node is Element) {
+    final el = styled.node as Element;
+    final tag = el.tagName;
+    if (const {'video', 'audio', 'canvas', 'iframe', 'object', 'embed', 'svg'}
+        .contains(tag)) {
+      final box = LayoutBox(LayoutType.inline, styled);
+      box.linkHref = href;
+      box.imageUrl = el.attributes['src'] ?? el.attributes['data'] ?? '';
+      final w = double.tryParse(el.attributes['width'] ?? '') ?? 0;
+      final h = double.tryParse(el.attributes['height'] ?? '') ?? 0;
+      box.imageWidth = w > 0 ? w : _defaultMediaWidth(tag);
+      box.imageHeight = h > 0 ? h : _defaultMediaHeight(tag);
+      return box;
+    }
+  }
+
   // Form elements → display-only boxes.
   if (styled.node is Element) {
     final el = styled.node as Element;
     final tag = el.tagName;
-    if (tag == 'input' || tag == 'button' || tag == 'select' || tag == 'textarea') {
+    if (const {'input', 'button', 'select', 'textarea', 'progress', 'meter'}
+        .contains(tag)) {
       final box = LayoutBox(LayoutType.inline, styled);
       box.linkHref = href;
       box.formTag = tag;
@@ -495,14 +513,31 @@ double _formBoxWidth(LayoutBox box) {
   if (box.formTag == 'textarea') return 200;
   if (box.formTag == 'select') return 150;
   if (box.formTag == 'button') return 80;
+  if (box.formTag == 'progress') return 160;
+  if (box.formTag == 'meter') return 80;
   if (box.formType == 'checkbox' || box.formType == 'radio') return 16;
+  if (box.formType == 'range') return 160;
+  if (box.formType == 'color') return 44;
   return 170; // text input default
 }
 
 double _formBoxHeight(LayoutBox box) {
   if (box.formTag == 'textarea') return 60;
+  if (box.formTag == 'progress') return 16;
+  if (box.formTag == 'meter') return 16;
   if (box.formType == 'checkbox' || box.formType == 'radio') return 16;
+  if (box.formType == 'color') return 24;
   return 24;
+}
+
+double _defaultMediaWidth(String tag) {
+  if (tag == 'audio') return 300;
+  return 300; // video, iframe, canvas, svg, object, embed
+}
+
+double _defaultMediaHeight(String tag) {
+  if (tag == 'audio') return 32;
+  return 150; // video, iframe, canvas, svg, object, embed
 }
 
 class _InlineItem {
