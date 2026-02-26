@@ -150,10 +150,10 @@ const ignoredElements = {'script', 'noscript', 'template'};
 const blockElements = {
   'html', 'body', 'article', 'section', 'nav', 'aside',
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-  'p', 'div', 'main', 'header', 'footer',
+  'p', 'div', 'main', 'header', 'footer', 'center',
   'ul', 'ol', 'li', 'dl', 'dt', 'dd',
   'blockquote', 'pre', 'figure', 'figcaption',
-  'table', 'thead', 'tbody', 'tfoot', 'tr',
+  'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'caption',
   'form', 'fieldset', 'legend',
   'details', 'summary', 'hr',
 };

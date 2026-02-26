@@ -238,6 +238,19 @@ void _applyDefaults(Element element, Map<String, String> props) {
       props.putIfAbsent('font-size', () => '16px');
       props.putIfAbsent('color', () => '#000000');
       props.putIfAbsent('margin', () => '8px');
+    case 'center':
+      props['text-align'] = 'center';
+    case 'tt':
+      props['font-family'] = 'monospace';
+    case 'font':
+      final face = element.attributes['face'];
+      if (face != null && face.isNotEmpty) {
+        props['font-family'] = face.split(',').first.trim();
+      }
+      final size = element.attributes['size'];
+      if (size != null && size.isNotEmpty) {
+        props['font-size'] = _htmlFontSize(size);
+      }
     case 'table':
       props['display'] = 'block';
       props['border-collapse'] = 'separate';
@@ -247,4 +260,43 @@ void _applyDefaults(Element element, Map<String, String> props) {
       props['font-weight'] = 'bold';
       props['text-align'] = 'center';
   }
+
+  // Apply HTML width/height attributes as presentational hints.
+  _applyHtmlAttributes(element, props);
+}
+
+void _applyHtmlAttributes(Element element, Map<String, String> props) {
+  final w = element.attributes['width'];
+  if (w != null && w.isNotEmpty && !props.containsKey('width')) {
+    props['width'] = _cssifyDimension(w);
+  }
+  final h = element.attributes['height'];
+  if (h != null && h.isNotEmpty && !props.containsKey('height')) {
+    props['height'] = _cssifyDimension(h);
+  }
+}
+
+String _cssifyDimension(String value) {
+  if (value.endsWith('%') || value.endsWith('px') || value.endsWith('em')) {
+    return value;
+  }
+  if (double.tryParse(value) != null) return '${value}px';
+  return value;
+}
+
+String _htmlFontSize(String size) {
+  int absolute;
+  if (size.startsWith('+')) {
+    absolute = 3 + (int.tryParse(size.substring(1)) ?? 0);
+  } else if (size.startsWith('-')) {
+    absolute = 3 - (int.tryParse(size.substring(1)) ?? 0);
+  } else {
+    absolute = int.tryParse(size) ?? 3;
+  }
+  absolute = absolute.clamp(1, 7);
+  const sizeMap = {
+    1: '10px', 2: '13px', 3: '16px', 4: '18px',
+    5: '24px', 6: '32px', 7: '48px',
+  };
+  return sizeMap[absolute] ?? '16px';
 }

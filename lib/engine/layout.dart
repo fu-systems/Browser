@@ -67,7 +67,7 @@ enum LayoutType { block, inline, anonymous, text }
 /// A node in the layout tree. Each box has a content rect plus
 /// margin, border, and padding edges.
 class LayoutBox {
-  final LayoutType layoutType;
+  LayoutType layoutType;
   final StyledNode? styledNode;
   final List<LayoutBox> children = [];
 
@@ -145,6 +145,14 @@ LayoutBox _buildLayoutTree(StyledNode styled, String? parentHref) {
     return box;
   }
 
+  // <br> → line-break marker in inline flow.
+  if (styled.node is Element && (styled.node as Element).tagName == 'br') {
+    final box = LayoutBox(LayoutType.text, styled);
+    box.text = '\n';
+    box.linkHref = href;
+    return box;
+  }
+
   final display = styled.display;
   if (display == Display.none) {
     final box = LayoutBox(LayoutType.block, styled);
@@ -192,6 +200,14 @@ LayoutBox _buildLayoutTree(StyledNode styled, String? parentHref) {
     box.children.add(childBox);
   }
 
+  // If an inline box contains any block children (e.g. <b><div>...</div></b>),
+  // promote it to block. Browsers do this by splitting the inline, but
+  // promotion is a simpler approximation that handles real-world pages.
+  if (box.layoutType == LayoutType.inline &&
+      box.children.any((c) => c.layoutType == LayoutType.block)) {
+    box.layoutType = LayoutType.block;
+  }
+
   return box;
 }
 
@@ -204,7 +220,9 @@ void _layoutBlock(LayoutBox box, double containerWidth, TextMeasurer measurer) {
   final contentWidth = box.content.width;
 
   // Lay out children.
-  if (_hasInlineChildren(box)) {
+  if (_isTableRow(box)) {
+    _layoutTableRow(box, contentWidth, measurer);
+  } else if (_hasInlineChildren(box)) {
     _layoutInlineChildren(box, contentWidth, measurer);
   } else {
     _layoutBlockChildren(box, contentWidth, measurer);
@@ -405,6 +423,13 @@ void _layoutInlineContent(
   double lineHeight = 0;
 
   for (final item in items) {
+    if (item.isLineBreak) {
+      // <br> — move to next line.
+      cursorX = box.content.x;
+      cursorY += lineHeight > 0 ? lineHeight : 22.4; // default line height
+      lineHeight = 0;
+      continue;
+    }
     if (item.replacedBox != null) {
       // Replaced element (image or form).
       final rb = item.replacedBox!;
@@ -483,7 +508,8 @@ double _formBoxHeight(LayoutBox box) {
 class _InlineItem {
   final _TextRun? textRun;
   final LayoutBox? replacedBox;
-  _InlineItem({this.textRun, this.replacedBox});
+  final bool isLineBreak;
+  _InlineItem({this.textRun, this.replacedBox, this.isLineBreak = false});
 }
 
 void _collectInlineItems(LayoutBox box, List<_InlineItem> items) {
@@ -491,16 +517,21 @@ void _collectInlineItems(LayoutBox box, List<_InlineItem> items) {
     if (child.imageUrl != null || child.formTag != null) {
       items.add(_InlineItem(replacedBox: child));
     } else if (child.text != null && child.text!.isNotEmpty) {
-      final s = child.styledNode;
-      items.add(_InlineItem(textRun: _TextRun(
-        text: child.text!,
-        fontSize: s?.prop('font-size', '16px') ?? '16px',
-        fontFamily: s?.prop('font-family', 'serif') ?? 'serif',
-        fontWeight: s?.prop('font-weight', 'normal') ?? 'normal',
-        fontStyle: s?.prop('font-style', 'normal') ?? 'normal',
-        styledNode: s,
-        linkHref: child.linkHref,
-      )));
+      // <br> elements produce text='\n' — emit a line-break item.
+      if (child.text == '\n') {
+        items.add(_InlineItem(isLineBreak: true));
+      } else {
+        final s = child.styledNode;
+        items.add(_InlineItem(textRun: _TextRun(
+          text: child.text!,
+          fontSize: s?.prop('font-size', '16px') ?? '16px',
+          fontFamily: s?.prop('font-family', 'serif') ?? 'serif',
+          fontWeight: s?.prop('font-weight', 'normal') ?? 'normal',
+          fontStyle: s?.prop('font-style', 'normal') ?? 'normal',
+          styledNode: s,
+          linkHref: child.linkHref,
+        )));
+      }
     } else if (child.children.isNotEmpty) {
       // Recurse into any child with descendants — covers inline wrappers
       // AND block elements nested inside inline parents (common in real HTML).
@@ -529,6 +560,83 @@ class _TextRun {
   });
 }
 
+
+// ── Table row layout ────────────────────────────────────────────────
+
+bool _isTableRow(LayoutBox box) {
+  if (box.styledNode?.node is! Element) return false;
+  return (box.styledNode!.node as Element).tagName == 'tr';
+}
+
+void _layoutTableRow(LayoutBox box, double containerWidth, TextMeasurer measurer) {
+  if (box.children.isEmpty) return;
+
+  // Parse cell widths from the CSS width property (which includes HTML attrs).
+  final cellCount = box.children.length;
+  final cellWidths = List<double>.filled(cellCount, -1.0);
+  double totalFixed = 0;
+  int autoCount = 0;
+
+  for (int i = 0; i < cellCount; i++) {
+    final cell = box.children[i];
+    final widthStr = cell.styledNode?.prop('width', '') ?? '';
+    if (widthStr.isNotEmpty && widthStr != 'auto') {
+      final w = _parsePx(widthStr, containerWidth);
+      if (w > 0) {
+        cellWidths[i] = w;
+        totalFixed += w;
+        continue;
+      }
+    }
+    autoCount++;
+  }
+
+  // Distribute remaining width to auto-width cells.
+  final remaining = math.max(0.0, containerWidth - totalFixed);
+  final autoWidth = autoCount > 0 ? remaining / autoCount : 0.0;
+  for (int i = 0; i < cellCount; i++) {
+    if (cellWidths[i] < 0) cellWidths[i] = autoWidth;
+  }
+
+  // Layout each cell horizontally.
+  double cursorX = box.content.x;
+
+  for (int i = 0; i < cellCount; i++) {
+    final cell = box.children[i];
+    final allocatedWidth = cellWidths[i];
+
+    // Compute box model for this cell.
+    _computeBoxDimensions(cell, allocatedWidth);
+    // Override width to fit allocated space.
+    cell.content.width = math.max(0, allocatedWidth -
+        cell.margin.left - cell.margin.right -
+        cell.border.left - cell.border.right -
+        cell.padding.left - cell.padding.right);
+    cell.content.x = cursorX +
+        cell.margin.left + cell.border.left + cell.padding.left;
+    cell.content.y = box.content.y +
+        cell.margin.top + cell.border.top + cell.padding.top;
+
+    // Layout cell contents.
+    if (_hasInlineChildren(cell)) {
+      _layoutInlineChildren(cell, cell.content.width, measurer);
+    } else {
+      _layoutBlockChildren(cell, cell.content.width, measurer);
+    }
+
+    // Auto-height for cell.
+    final heightProp = cell.styledNode?.prop('height', '') ?? '';
+    if (heightProp.isEmpty || heightProp == 'auto') {
+      double h = 0;
+      for (final child in cell.children) {
+        h = math.max(h, child.marginBox.y + child.marginBox.height - cell.content.y);
+      }
+      cell.content.height = h;
+    }
+
+    cursorX += allocatedWidth;
+  }
+}
 
 // ── CSS value parsing helpers ───────────────────────────────────────
 
