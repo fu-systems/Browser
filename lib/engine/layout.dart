@@ -720,7 +720,49 @@ void _layoutBlockChildren(
               child.border.left - child.border.right -
               child.padding.left - child.padding.right);
         }
-        _layoutBlock(child, child.content.width, measurer);
+        // Re-apply min/max-width constraints after float-based width override.
+        final cs = child.styledNode;
+        if (cs != null) {
+          final minW = cs.prop('min-width', '');
+          if (minW.isNotEmpty && minW != 'auto') {
+            child.content.width = math.max(child.content.width, _parsePx(minW, availWidth));
+          }
+          final maxW = cs.prop('max-width', '');
+          if (maxW.isNotEmpty && maxW != 'none') {
+            child.content.width = math.min(child.content.width, _parsePx(maxW, availWidth));
+          }
+        }
+        // Dispatch child layout without re-calling _computeBoxDimensions.
+        // _computeBoxDimensions was already called above for this child.
+        final childContentWidth = child.content.width;
+        if (child.layoutType == LayoutType.table) {
+          _layoutTable(child, childContentWidth, measurer);
+        } else if (child.layoutType == LayoutType.grid) {
+          _layoutGrid(child, childContentWidth, measurer);
+        } else if (child.layoutType == LayoutType.flex) {
+          _layoutFlex(child, childContentWidth, measurer);
+        } else if (_isTableRow(child)) {
+          _layoutTableRow(child, childContentWidth, measurer);
+        } else if (_hasInlineChildren(child)) {
+          _layoutInlineChildren(child, childContentWidth, measurer);
+        } else {
+          _layoutBlockChildren(child, childContentWidth, measurer);
+        }
+        // Auto-height for block children.
+        final hProp = child.styledNode?.prop('height', '') ?? '';
+        if (hProp.isEmpty || hProp == 'auto') {
+          if (child.layoutType != LayoutType.table &&
+              child.layoutType != LayoutType.flex &&
+              child.layoutType != LayoutType.grid) {
+            double h = 0;
+            for (final c in child.children) {
+              if (c.position == 'absolute' || c.position == 'fixed') continue;
+              h = math.max(h, c.marginBox.y + c.marginBox.height - child.content.y);
+            }
+            child.content.height = h;
+          }
+        }
+        _applyHeightConstraints(child);
       }
 
       cursorY = child.content.y + child.content.height +
@@ -920,6 +962,12 @@ void _layoutFlex(LayoutBox box, double containerWidth, TextMeasurer measurer) {
 
   final isRow = direction == 'row' || direction == 'row-reverse';
   final isReverse = direction == 'row-reverse' || direction == 'column-reverse';
+
+  // Per CSS Flexbox §4: whitespace-only text runs directly inside a flex
+  // container are not rendered — remove them from the child list.
+  box.children.removeWhere((child) =>
+      child.layoutType == LayoutType.text &&
+      (child.text ?? '').trim().isEmpty);
 
   // Compute child sizes.
   final flexChildren = <LayoutBox>[];
@@ -1262,6 +1310,11 @@ void _layoutGrid(LayoutBox box, double containerWidth, TextMeasurer measurer) {
   // Parse grid-template-columns.
   final colTemplate = s?.prop('grid-template-columns', '') ?? '';
   final rowTemplate = s?.prop('grid-template-rows', '') ?? '';
+
+  // Per CSS Grid spec: remove whitespace-only text children.
+  box.children.removeWhere((child) =>
+      child.layoutType == LayoutType.text &&
+      (child.text ?? '').trim().isEmpty);
 
   // Collect non-absolute children.
   final gridChildren = <LayoutBox>[];

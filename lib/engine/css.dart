@@ -221,21 +221,22 @@ class MediaQuery {
   /// Evaluate against viewport dimensions.
   bool evaluate(double viewportWidth, double viewportHeight) {
     // Type check.
+    bool result = true;
     if (type != null && type != 'all') {
       final matchesType = type == 'screen'; // We're always "screen".
-      if (negated) {
-        if (matchesType) return false;
-      } else {
-        if (!matchesType) return false;
+      if (!matchesType) result = false;
+    }
+    // Feature checks — all must pass.
+    if (result) {
+      for (final feature in features) {
+        if (!feature.evaluate(viewportWidth, viewportHeight)) {
+          result = false;
+          break;
+        }
       }
     }
-    // Feature checks.
-    for (final feature in features) {
-      if (!feature.evaluate(viewportWidth, viewportHeight)) {
-        return negated ? true : false;
-      }
-    }
-    return !negated;
+    // Apply negation at the end.
+    return negated ? !result : result;
   }
 }
 
@@ -703,6 +704,11 @@ class CssParser {
       }
 
       if (!inSingleQuote && !inDoubleQuote) {
+        // Skip inline comments inside property values.
+        if (_startsWith('/*')) {
+          _skipComment();
+          continue;
+        }
         if (c == '(') parenDepth++;
         if (c == ')') parenDepth--;
         if (parenDepth == 0 && (c == ';' || c == '}')) break;

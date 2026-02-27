@@ -116,18 +116,19 @@ enum Display {
 
 /// Build a StyledNode tree from a DOM tree and a list of stylesheets.
 StyledNode computeStyles(Node node, List<Stylesheet> stylesheets) {
-  return _styleNode(node, stylesheets, {});
+  return _styleNode(node, stylesheets, {}, {});
 }
 
 StyledNode _styleNode(
   Node node,
   List<Stylesheet> stylesheets,
   Map<String, String> inherited,
+  Map<String, String> parentAllProps,
 ) {
   Map<String, String> props;
 
   if (node is Element) {
-    props = _resolveElement(node, stylesheets, inherited);
+    props = _resolveElement(node, stylesheets, inherited, parentAllProps);
   } else {
     // Text nodes inherit from their parent.
     props = Map.of(inherited);
@@ -138,7 +139,7 @@ StyledNode _styleNode(
     if (child is Element && child.tagName == 'head') continue; // Skip head.
     if (child is Element && child.tagName == 'style') continue; // Skip style (CSS-only).
     if (child is Comment) continue;
-    final styledChild = _styleNode(child, stylesheets, _inheritableProps(props));
+    final styledChild = _styleNode(child, stylesheets, _inheritableProps(props), props);
     children.add(styledChild);
   }
 
@@ -155,6 +156,7 @@ Map<String, String> _resolveElement(
   Element element,
   List<Stylesheet> stylesheets,
   Map<String, String> inherited,
+  Map<String, String> parentAllProps,
 ) {
   // Start with inherited properties.
   final props = Map<String, String>.from(inherited);
@@ -215,18 +217,23 @@ Map<String, String> _resolveElement(
   }
 
   // Handle CSS-wide keywords: inherit, initial, unset.
-  _resolveKeywords(props, inherited);
+  _resolveKeywords(props, inherited, parentAllProps);
 
   return props;
 }
 
 /// Handle inherit/initial/unset keywords.
-void _resolveKeywords(Map<String, String> props, Map<String, String> inherited) {
+/// [inherited] has only inheritable properties; [parentAllProps] has ALL parent properties.
+void _resolveKeywords(Map<String, String> props, Map<String, String> inherited,
+    Map<String, String> parentAllProps) {
   final keys = props.keys.toList();
   for (final key in keys) {
     final val = props[key];
     if (val == 'inherit') {
-      if (inherited.containsKey(key)) {
+      // 'inherit' explicitly copies from parent, even non-inheritable properties.
+      if (parentAllProps.containsKey(key)) {
+        props[key] = parentAllProps[key]!;
+      } else if (inherited.containsKey(key)) {
         props[key] = inherited[key]!;
       } else {
         props.remove(key);

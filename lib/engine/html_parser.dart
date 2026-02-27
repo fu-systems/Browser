@@ -192,10 +192,26 @@ class HtmlParser {
         continue;
       }
 
-      // Text node.
-      final text = _parseText();
-      if (text.data.isNotEmpty) {
-        nodes.add(text);
+      // Text node. If current char is '<' but didn't match any tag pattern,
+      // consume it as literal text to avoid an infinite loop.
+      if (_current == '<') {
+        // The '<' didn't start a tag — treat it as literal text.
+        final buf = StringBuffer('<');
+        _advance();
+        // Also consume any following non-tag text.
+        while (!_eof && _current != '<') {
+          buf.write(_current);
+          _advance();
+        }
+        final text = buf.toString().replaceAll(RegExp(r'\s+'), ' ');
+        if (text.isNotEmpty) {
+          nodes.add(Text(_decodeEntities(text)));
+        }
+      } else {
+        final text = _parseText();
+        if (text.data.isNotEmpty) {
+          nodes.add(text);
+        }
       }
     }
     return nodes;
