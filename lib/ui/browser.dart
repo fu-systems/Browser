@@ -9,6 +9,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../engine/dom.dart' as dom;
 import '../engine/html_parser.dart';
 import '../engine/css.dart' as css;
 import '../engine/style.dart';
@@ -261,6 +262,9 @@ class _BrowserShellState extends State<BrowserShell> {
         _activeTab.layoutRoot = layoutRoot;
         _activeTab.pageHeight = _computePageHeight(layoutRoot);
         _activeTab.isLoading = false;
+        _activeTab.document = document;
+        _activeTab.bodyNode = body;
+        _activeTab.stylesheets = stylesheets;
       });
 
       // 11. Fetch images in background.
@@ -464,6 +468,91 @@ class _BrowserShellState extends State<BrowserShell> {
       }
     }
 
+    return null;
+  }
+
+  // ── Hover tracking for :hover pseudo-class ──────────────────────
+
+  dom.Element? _lastHoveredElement;
+
+  void _onHoverPage(Offset position) {
+    if (_activeTab.layoutRoot == null || _activeTab.document == null) return;
+    final adjustedY = position.dy + _activeTab.scrollOffset;
+    final element = _hitTestDomElement(_activeTab.layoutRoot!, position.dx, adjustedY);
+
+    if (element == _lastHoveredElement) return;
+
+    // Clear previous hover chain.
+    if (_lastHoveredElement != null) {
+      dom.Node? n = _lastHoveredElement;
+      while (n != null) {
+        if (n is dom.Element) n.isHovered = false;
+        n = n.parent;
+      }
+    }
+
+    // Set new hover chain (element + all ancestors).
+    _lastHoveredElement = element;
+    if (element != null) {
+      dom.Node? n = element;
+      while (n != null) {
+        if (n is dom.Element) n.isHovered = true;
+        n = n.parent;
+      }
+    }
+
+    // Re-style and re-layout.
+    _restyleForHover();
+  }
+
+  void _onHoverExit() {
+    if (_lastHoveredElement == null) return;
+    dom.Node? n = _lastHoveredElement;
+    while (n != null) {
+      if (n is dom.Element) n.isHovered = false;
+      n = n.parent;
+    }
+    _lastHoveredElement = null;
+    _restyleForHover();
+  }
+
+  void _restyleForHover() {
+    final tab = _activeTab;
+    if (tab.bodyNode == null || tab.stylesheets.isEmpty) return;
+
+    try {
+      var styledTree = computeStyles(tab.bodyNode!, tab.stylesheets);
+      final pipeline = widget.pluginPipeline;
+      if (pipeline != null) {
+        styledTree = pipeline.runStylesComputed(styledTree, tab.stylesheets);
+      }
+      final viewportWidth = _viewportWidth;
+      var layoutRoot = engine.layoutTree(styledTree, viewportWidth, _textMeasurer);
+      if (pipeline != null) {
+        layoutRoot = pipeline.runLayoutComplete(layoutRoot);
+      }
+      setState(() {
+        tab.layoutRoot = layoutRoot;
+        tab.pageHeight = _computePageHeight(layoutRoot);
+      });
+    } catch (_) {
+      // Ignore errors during hover re-style.
+    }
+  }
+
+  dom.Element? _hitTestDomElement(engine.LayoutBox box, double x, double y) {
+    // Depth-first: check children in reverse (topmost first).
+    for (final child in box.children.reversed) {
+      final result = _hitTestDomElement(child, x, y);
+      if (result != null) return result;
+    }
+    // Check this box.
+    final r = box.content;
+    if (x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height) {
+      if (box.styledNode?.node is dom.Element) {
+        return box.styledNode!.node as dom.Element;
+      }
+    }
     return null;
   }
 
@@ -1541,18 +1630,21 @@ class _BrowserShellState extends State<BrowserShell> {
 
         return Stack(
           children: [
-            Listener(
-              onPointerSignal: (event) {
-                if (event is PointerScrollEvent) {
-                  _onScroll(event.scrollDelta.dy);
-                }
-              },
-              child: GestureDetector(
-                onTapDown: (details) => _onTapPage(details.localPosition),
-                onPanStart: _onPanStart,
-                onPanUpdate: _onPanUpdate,
-                onPanEnd: _onPanEnd,
-                child: ClipRect(
+            MouseRegion(
+              onHover: (event) => _onHoverPage(event.localPosition),
+              onExit: (_) => _onHoverExit(),
+              child: Listener(
+                onPointerSignal: (event) {
+                  if (event is PointerScrollEvent) {
+                    _onScroll(event.scrollDelta.dy);
+                  }
+                },
+                child: GestureDetector(
+                  onTapDown: (details) => _onTapPage(details.localPosition),
+                  onPanStart: _onPanStart,
+                  onPanUpdate: _onPanUpdate,
+                  onPanEnd: _onPanEnd,
+                  child: ClipRect(
                   child: Stack(
                     children: [
                       CustomPaint(
@@ -1583,6 +1675,7 @@ class _BrowserShellState extends State<BrowserShell> {
                   ),
                 ),
               ),
+            ),
             ),
             // Scrollbar.
             if (pageHeight > viewportHeight)

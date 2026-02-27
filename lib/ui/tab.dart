@@ -4,7 +4,10 @@
 /// scroll position, rendered layout tree, and Phase 2 state.
 
 import 'dart:ui' as ui;
+import '../engine/css.dart' as css;
+import '../engine/dom.dart' as dom;
 import '../engine/layout.dart';
+import '../engine/style.dart';
 import '../plugin/built_in/script_manager.dart';
 
 class Tab {
@@ -17,6 +20,11 @@ class Tab {
   double pageHeight = 0;
   bool isLoading = false;
   String? errorMessage;
+
+  /// Retained DOM & style data for dynamic re-styling (hover, focus).
+  dom.Document? document;
+  dom.Node? bodyNode;
+  List<css.Stylesheet> stylesheets = [];
 
   /// Phase 2: image cache (URL → decoded ui.Image).
   final Map<String, ui.Image> imageCache = {};

@@ -18,8 +18,68 @@ class StyledNode {
   String? operator [](String property) => properties[property];
 
   /// Convenience: look up a property, falling back to a default.
-  String prop(String name, [String fallback = '']) =>
-      properties[name] ?? fallback;
+  /// Resolves var() references in property values.
+  String prop(String name, [String fallback = '']) {
+    final raw = properties[name];
+    if (raw == null) return fallback;
+    if (raw.contains('var(')) return _resolveVar(raw, properties) ?? fallback;
+    return raw;
+  }
+
+  /// Resolve var(--name) and var(--name, fallback) in a value string.
+  static String? _resolveVar(String value, Map<String, String> props, [int depth = 0]) {
+    if (depth > 10) return value; // Guard against circular references.
+    final result = StringBuffer();
+    int i = 0;
+    while (i < value.length) {
+      final varIdx = value.indexOf('var(', i);
+      if (varIdx == -1) {
+        result.write(value.substring(i));
+        break;
+      }
+      result.write(value.substring(i, varIdx));
+      // Find matching closing paren.
+      int parenDepth = 0;
+      int end = varIdx + 4;
+      while (end < value.length) {
+        if (value[end] == '(') parenDepth++;
+        if (value[end] == ')') {
+          if (parenDepth == 0) break;
+          parenDepth--;
+        }
+        end++;
+      }
+      final inner = value.substring(varIdx + 4, end).trim();
+      // Split on first comma for fallback.
+      final commaIdx = _findTopLevelComma(inner);
+      final varName = (commaIdx >= 0 ? inner.substring(0, commaIdx) : inner).trim();
+      final fallbackVal = commaIdx >= 0 ? inner.substring(commaIdx + 1).trim() : null;
+
+      final resolved = props[varName];
+      if (resolved != null && resolved.isNotEmpty) {
+        final r = resolved.contains('var(') ? _resolveVar(resolved, props, depth + 1) ?? '' : resolved;
+        result.write(r);
+      } else if (fallbackVal != null) {
+        final r = fallbackVal.contains('var(') ? _resolveVar(fallbackVal, props, depth + 1) ?? '' : fallbackVal;
+        result.write(r);
+      } else {
+        return null; // Unresolvable.
+      }
+      i = end + 1; // Skip past closing paren.
+    }
+    return result.toString();
+  }
+
+  /// Find the first comma not inside parentheses.
+  static int _findTopLevelComma(String s) {
+    int depth = 0;
+    for (int i = 0; i < s.length; i++) {
+      if (s[i] == '(') depth++;
+      if (s[i] == ')') depth--;
+      if (s[i] == ',' && depth == 0) return i;
+    }
+    return -1;
+  }
 
   /// Resolve the display type.
   Display get display {
@@ -30,6 +90,8 @@ class StyledNode {
     if (d == 'inline-block') return Display.inlineBlock;
     if (d == 'flex') return Display.flex;
     if (d == 'inline-flex') return Display.inlineFlex;
+    if (d == 'grid') return Display.grid;
+    if (d == 'inline-grid') return Display.inlineGrid;
     // Default: block for block elements, inline otherwise.
     if (node is Element) {
       return blockElements.contains((node as Element).tagName)
@@ -40,7 +102,7 @@ class StyledNode {
   }
 }
 
-enum Display { block, inline, inlineBlock, none, flex, inlineFlex }
+enum Display { block, inline, inlineBlock, none, flex, inlineFlex, grid, inlineGrid }
 
 // ── Style computation ───────────────────────────────────────────────
 
@@ -327,11 +389,15 @@ bool _pseudoClassMatches(Element element, PseudoSelector pseudo) {
     case 'visited':
       return false; // We don't track visited links.
     case 'hover':
+      return element.isHovered;
     case 'active':
+      return element.isActive;
     case 'focus':
-    case 'focus-within':
     case 'focus-visible':
-      return false; // Dynamic states — not matched during initial styling.
+      return element.isFocused;
+    case 'focus-within':
+      if (element.isFocused) return true;
+      return element.elementDescendants.any((e) => e.isFocused);
     case 'enabled':
       return !element.attributes.containsKey('disabled');
     case 'disabled':
@@ -444,6 +510,9 @@ Map<String, String> _inheritableProps(Map<String, String> props) {
   return {
     for (final key in _inheritableProperties)
       if (props.containsKey(key)) key: props[key]!,
+    // Custom properties (--*) are always inherited per CSS spec.
+    for (final entry in props.entries)
+      if (entry.key.startsWith('--')) entry.key: entry.value,
   };
 }
 

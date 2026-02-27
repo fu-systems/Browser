@@ -110,6 +110,11 @@ class Element extends Node {
   final String tagName;
   final Map<String, String> attributes;
 
+  /// Dynamic pseudo-class state — set by the UI layer.
+  bool isHovered = false;
+  bool isFocused = false;
+  bool isActive = false;
+
   /// Inline style attribute, parsed later by the CSS layer.
   String get inlineStyle => attributes['style'] ?? '';
 

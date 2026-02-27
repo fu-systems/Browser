@@ -63,7 +63,7 @@ class Rect {
       );
 }
 
-enum LayoutType { block, inline, anonymous, text, flex }
+enum LayoutType { block, inline, anonymous, text, flex, grid }
 
 /// A node in the layout tree. Each box has a content rect plus
 /// margin, border, and padding edges.
@@ -102,6 +102,10 @@ class LayoutBox {
   bool formFocused = false;
   List<String>? formOptions;       // For <select>: option labels
   List<String>? formOptionValues;  // For <select>: option values
+
+  /// Float behavior.
+  String float_ = 'none';  // none, left, right
+  String clear = 'none';   // none, left, right, both
 
   /// Positioning data.
   String position = 'static';  // static, relative, absolute, fixed, sticky
@@ -285,6 +289,20 @@ LayoutBox _buildLayoutTree(StyledNode styled, String? parentHref) {
     return box;
   }
 
+  // Grid layout.
+  if (display == Display.grid || display == Display.inlineGrid) {
+    final box = LayoutBox(LayoutType.grid, styled);
+    box.linkHref = href;
+    _applyVisualProperties(box, styled);
+
+    for (final child in styled.children) {
+      if (child.display == Display.none) continue;
+      final childBox = _buildLayoutTree(child, href);
+      box.children.add(childBox);
+    }
+    return box;
+  }
+
   final type = (display == Display.inline || display == Display.inlineBlock)
       ? LayoutType.inline
       : LayoutType.block;
@@ -309,6 +327,10 @@ LayoutBox _buildLayoutTree(StyledNode styled, String? parentHref) {
 
 /// Apply visual properties from styled node to layout box.
 void _applyVisualProperties(LayoutBox box, StyledNode styled) {
+  // Float and clear.
+  box.float_ = styled.prop('float', 'none');
+  box.clear = styled.prop('clear', 'none');
+
   // Position.
   box.position = styled.prop('position', 'static');
   final topStr = styled.prop('top', '');
@@ -390,7 +412,9 @@ void _layoutBlock(LayoutBox box, double containerWidth, TextMeasurer measurer) {
   final contentWidth = box.content.width;
 
   // Lay out children.
-  if (box.layoutType == LayoutType.flex) {
+  if (box.layoutType == LayoutType.grid) {
+    _layoutGrid(box, contentWidth, measurer);
+  } else if (box.layoutType == LayoutType.flex) {
     _layoutFlex(box, contentWidth, measurer);
   } else if (_isTableRow(box)) {
     _layoutTableRow(box, contentWidth, measurer);
@@ -410,6 +434,13 @@ void _layoutBlock(LayoutBox box, double containerWidth, TextMeasurer measurer) {
       h = math.max(h, child.marginBox.y + child.marginBox.height - box.content.y);
     }
     box.content.height = h;
+  }
+
+  // If this box establishes a BFC (has overflow != visible, or is the root),
+  // expand height to contain all floats.
+  final overflowProp = box.styledNode?.prop('overflow', 'visible') ?? 'visible';
+  if (overflowProp != 'visible' || box.position == 'absolute' || box.position == 'fixed') {
+    // Already enclosed by BFC rules.
   }
 
   // Apply min/max height constraints.
@@ -503,15 +534,90 @@ void _applyPositioning(LayoutBox box) {
   }
 }
 
+// ── Float tracking ──────────────────────────────────────────────────
+
+class _FloatRect {
+  final double x, y, width, height;
+  final String side; // 'left' or 'right'
+  _FloatRect(this.x, this.y, this.width, this.height, this.side);
+  double get bottom => y + height;
+  double get right_ => x + width;
+}
+
+class _FloatContext {
+  final List<_FloatRect> lefts = [];
+  final List<_FloatRect> rights = [];
+
+  void addFloat(_FloatRect f) {
+    if (f.side == 'left') lefts.add(f);
+    else rights.add(f);
+  }
+
+  /// Get the Y position needed to clear past floats.
+  double clearY(String clear, double currentY) {
+    double y = currentY;
+    if (clear == 'left' || clear == 'both') {
+      for (final f in lefts) {
+        if (f.bottom > y) y = f.bottom;
+      }
+    }
+    if (clear == 'right' || clear == 'both') {
+      for (final f in rights) {
+        if (f.bottom > y) y = f.bottom;
+      }
+    }
+    return y;
+  }
+
+  /// Get available width and left offset at a given Y, accounting for floats.
+  /// Returns (leftEdge, availableWidth).
+  (double, double) availableAt(double y, double height, double containerX, double containerWidth) {
+    double leftEdge = containerX;
+    double rightEdge = containerX + containerWidth;
+
+    for (final f in lefts) {
+      if (y < f.bottom && y + height > f.y) {
+        leftEdge = math.max(leftEdge, f.right_);
+      }
+    }
+    for (final f in rights) {
+      if (y < f.bottom && y + height > f.y) {
+        rightEdge = math.min(rightEdge, f.x);
+      }
+    }
+
+    return (leftEdge, math.max(0, rightEdge - leftEdge));
+  }
+
+  /// Find a Y position where the given width fits.
+  double findYForWidth(double startY, double neededWidth, double height, double containerX, double containerWidth) {
+    double y = startY;
+    for (int i = 0; i < 100; i++) { // Safety limit
+      final (_, avail) = availableAt(y, height, containerX, containerWidth);
+      if (avail >= neededWidth || avail >= containerWidth) return y;
+      // Move past the lowest float that's blocking us
+      double nextY = double.infinity;
+      for (final f in [...lefts, ...rights]) {
+        if (f.bottom > y && f.bottom < nextY) nextY = f.bottom;
+      }
+      if (nextY == double.infinity) return y;
+      y = nextY;
+    }
+    return y;
+  }
+}
+
 // ── Block children layout ───────────────────────────────────────────
 
 void _layoutBlockChildren(
   LayoutBox box,
   double containerWidth,
-  TextMeasurer measurer,
-) {
+  TextMeasurer measurer, [
+  _FloatContext? parentFloats,
+]) {
   _ensureBlockChildren(box);
 
+  final floats = parentFloats ?? _FloatContext();
   double cursorY = box.content.y;
   double prevMarginBottom = 0;
 
@@ -525,24 +631,52 @@ void _layoutBlockChildren(
 
       _computeBoxDimensions(child, containerWidth);
 
+      // Handle clear property.
+      if (child.clear != 'none') {
+        cursorY = floats.clearY(child.clear, cursorY);
+      }
+
+      // Handle floated children.
+      if (child.float_ == 'left' || child.float_ == 'right') {
+        _layoutFloatedChild(child, box, containerWidth, cursorY, floats, measurer);
+        continue;
+      }
+
       // Collapse adjacent vertical margins.
       final collapsed = math.max(prevMarginBottom, child.margin.top);
 
       if (child.layoutType == LayoutType.text ||
           child.layoutType == LayoutType.inline) {
-        child.content.x = box.content.x + child.margin.left + child.border.left + child.padding.left;
-        child.content.y = cursorY + collapsed + child.border.top + child.padding.top;
+        // Get available space accounting for floats.
+        final childTop = cursorY + collapsed + child.border.top + child.padding.top;
+        final (leftEdge, availWidth) = floats.availableAt(
+            childTop, 20, box.content.x, containerWidth);
+        child.content.x = leftEdge + child.margin.left + child.border.left + child.padding.left;
+        child.content.y = childTop;
+        child.content.width = math.max(0, availWidth -
+            child.margin.left - child.margin.right -
+            child.border.left - child.border.right -
+            child.padding.left - child.padding.right);
         _layoutInlineContent(child, child.content.width, measurer);
       } else {
-        child.content.x = box.content.x +
+        // Block child — shrink around floats.
+        final childTop = cursorY + collapsed + child.border.top + child.padding.top;
+        final (leftEdge, availWidth) = floats.availableAt(
+            childTop, 20, box.content.x, containerWidth);
+        child.content.x = leftEdge +
             child.margin.left +
             child.border.left +
             child.padding.left;
-        child.content.y = cursorY +
-            collapsed +
-            child.border.top +
-            child.padding.top;
-        _layoutBlock(child, containerWidth, measurer);
+        child.content.y = childTop;
+        // If the block has no explicit width, constrain to available space.
+        final explicitWidth = child.styledNode?.prop('width', '') ?? '';
+        if (explicitWidth.isEmpty || explicitWidth == 'auto') {
+          child.content.width = math.max(0, availWidth -
+              child.margin.left - child.margin.right -
+              child.border.left - child.border.right -
+              child.padding.left - child.padding.right);
+        }
+        _layoutBlock(child, child.content.width, measurer);
       }
 
       cursorY = child.content.y + child.content.height +
@@ -552,6 +686,80 @@ void _layoutBlockChildren(
       // Skip this child on error; continue laying out remaining content.
     }
   }
+}
+
+/// Layout a floated child and register it in the float context.
+void _layoutFloatedChild(
+  LayoutBox child,
+  LayoutBox containingBlock,
+  double containerWidth,
+  double cursorY,
+  _FloatContext floats,
+  TextMeasurer measurer,
+) {
+  // Compute the child's box model.
+  _computeBoxDimensions(child, containerWidth);
+
+  // Determine the child's total outer width.
+  final outerWidth = child.content.width +
+      child.margin.left + child.margin.right +
+      child.border.left + child.border.right +
+      child.padding.left + child.padding.right;
+  final outerHeight = 20.0; // Estimate; will refine after layout.
+
+  // Find a Y position where the float fits.
+  final y = floats.findYForWidth(
+      cursorY, outerWidth, outerHeight,
+      containingBlock.content.x, containerWidth);
+
+  final (leftEdge, availWidth) = floats.availableAt(
+      y, outerHeight, containingBlock.content.x, containerWidth);
+
+  if (child.float_ == 'left') {
+    child.content.x = leftEdge + child.margin.left + child.border.left + child.padding.left;
+  } else {
+    // Right float: align to the right edge.
+    final rightEdge = leftEdge + availWidth;
+    child.content.x = rightEdge - outerWidth +
+        child.margin.left + child.border.left + child.padding.left;
+  }
+
+  child.content.y = y + child.margin.top + child.border.top + child.padding.top;
+
+  // Layout child content.
+  if (child.layoutType == LayoutType.flex) {
+    _layoutFlex(child, child.content.width, measurer);
+  } else if (_hasInlineChildren(child)) {
+    _layoutInlineChildren(child, child.content.width, measurer);
+  } else {
+    _layoutBlockChildren(child, child.content.width, measurer, floats);
+  }
+
+  // Auto-height.
+  final heightProp = child.styledNode?.prop('height', '') ?? '';
+  if (heightProp.isEmpty || heightProp == 'auto') {
+    double h = 0;
+    for (final c in child.children) {
+      h = math.max(h, c.marginBox.y + c.marginBox.height - child.content.y);
+    }
+    child.content.height = math.max(h, child.content.height);
+  }
+  _applyHeightConstraints(child);
+
+  // Register this float.
+  final totalHeight = child.content.height +
+      child.margin.top + child.margin.bottom +
+      child.border.top + child.border.bottom +
+      child.padding.top + child.padding.bottom;
+
+  floats.addFloat(_FloatRect(
+    child.content.x - child.border.left - child.padding.left - child.margin.left,
+    y,
+    outerWidth,
+    totalHeight,
+    child.float_,
+  ));
+
 }
 
 /// Layout an absolutely positioned child within a containing block.
@@ -613,7 +821,7 @@ void _ensureBlockChildren(LayoutBox box) {
 
   final hasBlock = box.children.any((c) =>
       c.layoutType == LayoutType.block || c.layoutType == LayoutType.anonymous ||
-      c.layoutType == LayoutType.flex);
+      c.layoutType == LayoutType.flex || c.layoutType == LayoutType.grid);
   final hasInline = box.children.any((c) =>
       c.layoutType == LayoutType.inline || c.layoutType == LayoutType.text);
 
@@ -977,6 +1185,245 @@ void _relayoutChildPositions(LayoutBox box) {
   }
 }
 
+// ── Grid layout ─────────────────────────────────────────────────────
+
+void _layoutGrid(LayoutBox box, double containerWidth, TextMeasurer measurer) {
+  final s = box.styledNode;
+  final gap = _parsePx(s?.prop('gap', '0') ?? '0');
+  final rowGap = _parsePx(s?.prop('row-gap', '') ?? '', gap);
+  final colGap = _parsePx(s?.prop('column-gap', '') ?? '', gap);
+
+  // Parse grid-template-columns.
+  final colTemplate = s?.prop('grid-template-columns', '') ?? '';
+  final rowTemplate = s?.prop('grid-template-rows', '') ?? '';
+
+  // Collect non-absolute children.
+  final gridChildren = <LayoutBox>[];
+  for (final child in box.children) {
+    if (child.position == 'absolute' || child.position == 'fixed') {
+      _layoutAbsoluteChild(child, box, containerWidth, measurer);
+      continue;
+    }
+    gridChildren.add(child);
+  }
+
+  if (gridChildren.isEmpty) return;
+
+  // Parse column definitions.
+  final colDefs = _parseGridTemplate(colTemplate, containerWidth, colGap);
+  // Auto-compute column count from children if no template.
+  final numCols = colDefs.isNotEmpty ? colDefs.length : _autoGridCols(gridChildren.length, containerWidth);
+  final numRows = (gridChildren.length / numCols).ceil();
+
+  // Compute column widths.
+  List<double> colWidths;
+  if (colDefs.isNotEmpty) {
+    // Distribute fr units in remaining space.
+    colWidths = _resolveGridTracks(colDefs, containerWidth, colGap);
+  } else {
+    // Equal-width auto columns.
+    final w = (containerWidth - colGap * (numCols - 1)) / numCols;
+    colWidths = List.filled(numCols, math.max(0, w));
+  }
+
+  // Parse row heights (if provided).
+  final rowDefs = _parseGridTemplate(rowTemplate, 0, rowGap);
+
+  // First pass: layout children to determine row heights.
+  final rowHeights = List.filled(numRows, 0.0);
+  for (int i = 0; i < gridChildren.length; i++) {
+    final child = gridChildren[i];
+    final col = i % numCols;
+    final row = i ~/ numCols;
+    final cellWidth = colWidths[col];
+
+    _computeBoxDimensions(child, cellWidth);
+    child.content.width = math.max(0, cellWidth -
+        child.margin.left - child.margin.right -
+        child.border.left - child.border.right -
+        child.padding.left - child.padding.right);
+
+    child.content.x = 0;
+    child.content.y = 0;
+    if (child.layoutType == LayoutType.flex) {
+      _layoutFlex(child, child.content.width, measurer);
+    } else if (child.layoutType == LayoutType.grid) {
+      _layoutGrid(child, child.content.width, measurer);
+    } else if (_hasInlineChildren(child)) {
+      _layoutInlineContent(child, child.content.width, measurer);
+    } else {
+      _layoutBlockChildren(child, child.content.width, measurer);
+    }
+
+    // Auto-height.
+    final heightProp = child.styledNode?.prop('height', '') ?? '';
+    if (heightProp.isEmpty || heightProp == 'auto') {
+      double h = 0;
+      for (final c in child.children) {
+        h = math.max(h, c.marginBox.y + c.marginBox.height - child.content.y);
+      }
+      child.content.height = h;
+    }
+    _applyHeightConstraints(child);
+
+    final totalH = child.content.height +
+        child.margin.top + child.margin.bottom +
+        child.border.top + child.border.bottom +
+        child.padding.top + child.padding.bottom;
+
+    // Use row template height if specified, otherwise take max of children.
+    if (row < rowDefs.length && rowDefs[row].unit != 'auto') {
+      rowHeights[row] = math.max(rowHeights[row], _resolveGridTracks(
+          [rowDefs[row]], totalH, 0).first);
+    } else {
+      rowHeights[row] = math.max(rowHeights[row], totalH);
+    }
+  }
+
+  // Second pass: position children.
+  for (int i = 0; i < gridChildren.length; i++) {
+    final child = gridChildren[i];
+    final col = i % numCols;
+    final row = i ~/ numCols;
+
+    // Calculate X offset.
+    double x = box.content.x;
+    for (int c = 0; c < col; c++) {
+      x += colWidths[c] + colGap;
+    }
+
+    // Calculate Y offset.
+    double y = box.content.y;
+    for (int r = 0; r < row; r++) {
+      y += rowHeights[r] + rowGap;
+    }
+
+    final cellWidth = colWidths[col];
+    child.content.width = math.max(0, cellWidth -
+        child.margin.left - child.margin.right -
+        child.border.left - child.border.right -
+        child.padding.left - child.padding.right);
+
+    child.content.x = x + child.margin.left + child.border.left + child.padding.left;
+    child.content.y = y + child.margin.top + child.border.top + child.padding.top;
+
+    // Re-layout with final position.
+    if (child.layoutType == LayoutType.flex) {
+      _layoutFlex(child, child.content.width, measurer);
+    } else if (child.layoutType == LayoutType.grid) {
+      _layoutGrid(child, child.content.width, measurer);
+    } else if (_hasInlineChildren(child)) {
+      _layoutInlineContent(child, child.content.width, measurer);
+    } else {
+      _layoutBlockChildren(child, child.content.width, measurer);
+    }
+
+    // Final height.
+    final heightProp = child.styledNode?.prop('height', '') ?? '';
+    if (heightProp.isEmpty || heightProp == 'auto') {
+      double h = 0;
+      for (final c in child.children) {
+        h = math.max(h, c.marginBox.y + c.marginBox.height - child.content.y);
+      }
+      child.content.height = h;
+    }
+    _applyHeightConstraints(child);
+    _applyPositioning(child);
+  }
+
+  // Set box height.
+  final heightProp = box.styledNode?.prop('height', '') ?? '';
+  if (heightProp.isEmpty || heightProp == 'auto') {
+    double totalH = 0;
+    for (int r = 0; r < numRows; r++) {
+      totalH += rowHeights[r];
+      if (r < numRows - 1) totalH += rowGap;
+    }
+    box.content.height = totalH;
+  }
+}
+
+/// A grid track definition: fixed px, fraction (fr), percentage, or auto.
+class _GridTrack {
+  final double value;
+  final String unit; // 'px', 'fr', '%', 'auto', 'min-content', 'max-content'
+  _GridTrack(this.value, this.unit);
+}
+
+/// Parse a grid-template-columns/rows value like "1fr 200px auto 2fr".
+List<_GridTrack> _parseGridTemplate(String template, double containerSize, double gap) {
+  if (template.isEmpty) return [];
+  final tracks = <_GridTrack>[];
+
+  // Handle repeat(N, ...).
+  final expanded = _expandGridRepeat(template);
+
+  for (final part in expanded.trim().split(RegExp(r'\s+'))) {
+    final p = part.trim();
+    if (p.isEmpty) continue;
+    if (p.endsWith('fr')) {
+      final n = double.tryParse(p.replaceAll('fr', '')) ?? 1;
+      tracks.add(_GridTrack(n, 'fr'));
+    } else if (p == 'auto' || p == 'min-content' || p == 'max-content') {
+      tracks.add(_GridTrack(0, 'auto'));
+    } else if (p.endsWith('%')) {
+      final n = double.tryParse(p.replaceAll('%', '')) ?? 0;
+      tracks.add(_GridTrack(n / 100 * containerSize, 'px'));
+    } else {
+      tracks.add(_GridTrack(_parsePx(p), 'px'));
+    }
+  }
+  return tracks;
+}
+
+/// Expand repeat(N, pattern) in grid template.
+String _expandGridRepeat(String template) {
+  final repeatRegex = RegExp(r'repeat\(\s*(\d+)\s*,\s*([^)]+)\)');
+  return template.replaceAllMapped(repeatRegex, (m) {
+    final count = int.tryParse(m.group(1)!) ?? 1;
+    final pattern = m.group(2)!.trim();
+    return List.filled(count, pattern).join(' ');
+  });
+}
+
+/// Resolve grid tracks: distribute fr units in remaining space.
+List<double> _resolveGridTracks(List<_GridTrack> tracks, double totalSize, double gap) {
+  final widths = List.filled(tracks.length, 0.0);
+  double usedSpace = gap * (tracks.length - 1).clamp(0, double.infinity);
+  double totalFr = 0;
+
+  for (int i = 0; i < tracks.length; i++) {
+    if (tracks[i].unit == 'px') {
+      widths[i] = tracks[i].value;
+      usedSpace += tracks[i].value;
+    } else if (tracks[i].unit == 'fr') {
+      totalFr += tracks[i].value;
+    } else {
+      // auto: will get a share of remaining space like 1fr.
+      totalFr += 1;
+      tracks[i] = _GridTrack(1, 'fr');
+    }
+  }
+
+  final remaining = math.max(0, totalSize - usedSpace);
+  if (totalFr > 0) {
+    for (int i = 0; i < tracks.length; i++) {
+      if (tracks[i].unit == 'fr') {
+        widths[i] = remaining * (tracks[i].value / totalFr);
+      }
+    }
+  }
+
+  return widths;
+}
+
+/// Determine a reasonable auto column count for grids without explicit columns.
+int _autoGridCols(int childCount, double containerWidth) {
+  // Heuristic: aim for cells around 200-300px wide.
+  final cols = (containerWidth / 250).floor().clamp(1, childCount);
+  return cols;
+}
+
 // ── Inline layout ───────────────────────────────────────────────────
 
 bool _hasInlineChildren(LayoutBox box) {
@@ -1255,6 +1702,11 @@ void _layoutTableRow(LayoutBox box, double containerWidth, TextMeasurer measurer
 double _parsePx(String value, [double fallback = 0]) {
   if (value.isEmpty) return fallback;
 
+  // Handle calc() expressions.
+  if (value.startsWith('calc(') && value.endsWith(')')) {
+    return _evaluateCalc(value.substring(5, value.length - 1), fallback);
+  }
+
   // Handle "Xpx".
   if (value.endsWith('px')) {
     return double.tryParse(value.replaceAll('px', '')) ?? fallback;
@@ -1405,6 +1857,117 @@ EdgeSizes _parseBorderWidths(StyledNode s) {
   if (blw.isNotEmpty) left = _parsePx(blw);
 
   return EdgeSizes(top, right, bottom, left);
+}
+
+/// Evaluate a calc() expression like "100% - 20px" or "50vw + 2rem".
+/// Supports +, -, *, / with standard operator precedence.
+double _evaluateCalc(String expr, double percentBase) {
+  final tokens = _tokenizeCalc(expr.trim());
+  if (tokens.isEmpty) return 0;
+  return _parseCalcAddSub(tokens, 0, percentBase).$1;
+}
+
+/// Tokenize a calc expression into numbers-with-units and operators.
+List<String> _tokenizeCalc(String expr) {
+  final tokens = <String>[];
+  int i = 0;
+  while (i < expr.length) {
+    final c = expr[i];
+    if (c == ' ' || c == '\t') { i++; continue; }
+    if (c == '(') {
+      // Find matching close paren.
+      int depth = 1;
+      int start = i + 1;
+      i++;
+      while (i < expr.length && depth > 0) {
+        if (expr[i] == '(') depth++;
+        if (expr[i] == ')') depth--;
+        i++;
+      }
+      tokens.add('(${expr.substring(start, i - 1)})');
+    } else if (c == '+' || c == '-') {
+      // Distinguish unary minus from binary minus.
+      if (tokens.isNotEmpty && !_isCalcOp(tokens.last)) {
+        tokens.add(c);
+        i++;
+      } else {
+        // Unary: part of number.
+        final start = i;
+        i++;
+        while (i < expr.length && (RegExp(r'[0-9a-zA-Z.%]').hasMatch(expr[i]))) i++;
+        tokens.add(expr.substring(start, i));
+      }
+    } else if (c == '*' || c == '/') {
+      tokens.add(c);
+      i++;
+    } else {
+      // Number with optional unit.
+      final start = i;
+      while (i < expr.length && expr[i] != ' ' && expr[i] != '+' && expr[i] != '-' &&
+          expr[i] != '*' && expr[i] != '/' && expr[i] != ')' && expr[i] != '(') {
+        i++;
+      }
+      tokens.add(expr.substring(start, i));
+    }
+  }
+  return tokens;
+}
+
+bool _isCalcOp(String s) => s == '+' || s == '-' || s == '*' || s == '/';
+
+/// Parse addition/subtraction (lowest precedence).
+(double, int) _parseCalcAddSub(List<String> tokens, int pos, double percentBase) {
+  var (value, i) = _parseCalcMulDiv(tokens, pos, percentBase);
+  while (i < tokens.length) {
+    final op = tokens[i];
+    if (op != '+' && op != '-') break;
+    i++;
+    final (right, ni) = _parseCalcMulDiv(tokens, i, percentBase);
+    i = ni;
+    value = op == '+' ? value + right : value - right;
+  }
+  return (value, i);
+}
+
+/// Parse multiplication/division (higher precedence).
+(double, int) _parseCalcMulDiv(List<String> tokens, int pos, double percentBase) {
+  var (value, i) = _parseCalcAtom(tokens, pos, percentBase);
+  while (i < tokens.length) {
+    final op = tokens[i];
+    if (op != '*' && op != '/') break;
+    i++;
+    final (right, ni) = _parseCalcAtom(tokens, i, percentBase);
+    i = ni;
+    value = op == '*' ? value * right : (right != 0 ? value / right : 0);
+  }
+  return (value, i);
+}
+
+/// Parse an atom: a number with unit, or a parenthesized sub-expression.
+(double, int) _parseCalcAtom(List<String> tokens, int pos, double percentBase) {
+  if (pos >= tokens.length) return (0, pos);
+  final token = tokens[pos];
+  if (token.startsWith('(') && token.endsWith(')')) {
+    final inner = token.substring(1, token.length - 1);
+    return (_evaluateCalc(inner, percentBase), pos + 1);
+  }
+  return (_parsePxCalcValue(token, percentBase), pos + 1);
+}
+
+/// Parse a single value with unit inside calc. Handles %, px, em, rem, vw, vh, etc.
+double _parsePxCalcValue(String value, double percentBase) {
+  if (value.endsWith('%')) {
+    final n = double.tryParse(value.replaceAll('%', ''));
+    if (n != null) return n / 100 * percentBase;
+    return 0;
+  }
+  if (value.endsWith('px')) return double.tryParse(value.replaceAll('px', '')) ?? 0;
+  if (value.endsWith('rem')) { final n = double.tryParse(value.replaceAll('rem', '')); return n != null ? n * 16 : 0; }
+  if (value.endsWith('em')) { final n = double.tryParse(value.replaceAll('em', '')); return n != null ? n * 16 : 0; }
+  if (value.endsWith('vw')) { final n = double.tryParse(value.replaceAll('vw', '')); return n != null ? n / 100 * 1024 : 0; }
+  if (value.endsWith('vh')) { final n = double.tryParse(value.replaceAll('vh', '')); return n != null ? n / 100 * 768 : 0; }
+  if (value.endsWith('pt')) { final n = double.tryParse(value.replaceAll('pt', '')); return n != null ? n * 1.333 : 0; }
+  return double.tryParse(value) ?? 0;
 }
 
 double _parseBorderSide(String value) {
