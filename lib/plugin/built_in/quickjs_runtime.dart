@@ -5,6 +5,7 @@
 /// to a buffer. After each eval, the Dart layer reads and parses the buffer
 /// to build a [JsExecResult].
 
+import 'dart:convert';
 import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
@@ -103,8 +104,10 @@ class QuickJSRuntime {
     // Clear output buffer before eval
     b.clearOutputBuffer(ctx);
 
-    final sourcePtr = source.toNativeUtf8();
-    final filenamePtr = '<script>'.toNativeUtf8();
+    // Use UTF-8 byte length, not Dart string length (UTF-16 code units)
+    final sourceBytes = utf8.encode(source);
+    final sourcePtr = source.toNativeUtf8(allocator: malloc);
+    final filenamePtr = '<script>'.toNativeUtf8(allocator: malloc);
 
     final errors = <String>[];
 
@@ -112,7 +115,7 @@ class QuickJSRuntime {
       final result = b.eval(
         ctx,
         sourcePtr.cast(),
-        source.length,
+        sourceBytes.length,
         filenamePtr.cast(),
         0, // JS_EVAL_TYPE_GLOBAL
       );
@@ -129,8 +132,8 @@ class QuickJSRuntime {
     } catch (e) {
       errors.add('FFI error: $e');
     } finally {
-      calloc.free(sourcePtr);
-      calloc.free(filenamePtr);
+      malloc.free(sourcePtr);
+      malloc.free(filenamePtr);
     }
 
     // Read output buffer

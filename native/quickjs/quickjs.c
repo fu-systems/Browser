@@ -105,6 +105,9 @@ struct JSContext {
     size_t output_cap;
     /* Statement counter for interrupt checks */
     int stmt_counter;
+    /* Return value mechanism (per-context, not global) */
+    JSValue return_value;
+    int has_return;
 };
 
 /* ================================================================
@@ -201,6 +204,7 @@ static JSValue js_mkfunc_c(JSContext *ctx, JSCFunction *func,
     f->type = FUNC_C;
     f->ref = 1;
     f->name = js_strdup(ctx->rt, name ? name : "");
+    if (!f->name) { js_free(ctx->rt, f, sizeof(JSFunc_s)); return JS_EXCEPTION; }
     f->u.c.callback = func ? *func : NULL;
     f->u.c.length = length;
     return JS_MKVAL(JS_TAG_C_FUNCTION, (uintptr_t)f);
@@ -214,7 +218,13 @@ static JSValue js_mkfunc_js(JSContext *ctx, const char *source, size_t source_le
     f->type = FUNC_JS;
     f->ref = 1;
     f->name = js_strdup(ctx->rt, "");
+    if (!f->name) { js_free(ctx->rt, f, sizeof(JSFunc_s)); return JS_EXCEPTION; }
     f->u.js.source = js_strndup(ctx->rt, source, source_len);
+    if (!f->u.js.source) {
+        js_free(ctx->rt, f->name, 1);
+        js_free(ctx->rt, f, sizeof(JSFunc_s));
+        return JS_EXCEPTION;
+    }
     f->u.js.source_len = source_len;
     f->u.js.params = params;
     f->u.js.param_count = param_count;
@@ -243,44 +253,13 @@ static JSFunc_s *js_get_func(JSValue v) {
     return (JSFunc_s *)JS_VALUE_GET_PTR(v);
 }
 
-/* Convert value to number (double) */
-static double js_to_number(JSValue v) {
-    int tag = JS_VALUE_GET_TAG(v);
-    if (tag == JS_TAG_INT) return (double)JS_VALUE_GET_INT(v);
-    if (tag == JS_TAG_FLOAT64) {
-        double d;
-        memcpy(&d, &v, sizeof(double)); /* lower 48 bits aren't enough for double */
-        /* Actually, we store float64 differently: the payload IS the double bits */
-        uint64_t payload = v & 0xFFFFFFFFFFFFULL;
-        /* We need to store the full double. Let's use a union approach. */
-        /* For float64 we store the raw bits in the lower 48, which truncates.
-           Instead, let's store float64 as a heap-allocated double. */
-        /* HACK: for now, return the int bits as double */
-        return (double)(int32_t)(payload & 0xFFFFFFFFULL);
-    }
-    if (tag == JS_TAG_BOOL) return JS_VALUE_GET_BOOL(v) ? 1.0 : 0.0;
-    if (tag == JS_TAG_NULL) return 0.0;
-    if (tag == JS_TAG_STRING) {
-        JSString_s *s = js_get_string(v);
-        if (s && s->data) {
-            char *end;
-            double d = strtod(s->data, &end);
-            if (end != s->data) return d;
-        }
-        return NAN;
-    }
-    return NAN;
-}
-
 /* Forward declarations */
 static JSValue js_eval_source(JSContext *ctx, const char *input, size_t len);
 static void js_free_prop_list(JSRuntime *rt, JSProp *p);
 static void scope_free(JSRuntime *rt, Scope *scope);
 static int scope_define(JSRuntime *rt, Scope *scope, const char *name, JSValue val);
 
-/* Global return value mechanism (used by functions to return values) */
-static JSValue ctx_return_value;
-static int ctx_has_return;
+/* Return value mechanism is now per-context: ctx->return_value / ctx->has_return */
 
 /* ================================================================
  * Section 4: Float64 Storage
@@ -318,7 +297,6 @@ static double js_get_float64(JSValue v) {
     return NAN;
 }
 
-/* Updated js_to_number using proper float storage */
 static double js_value_to_number(JSValue v) {
     int tag = JS_VALUE_GET_TAG(v);
     if (tag == JS_TAG_INT) return (double)JS_VALUE_GET_INT(v);
@@ -402,6 +380,15 @@ static void js_free_value_rt(JSRuntime *rt, JSValue val) {
                     for (int i = 0; i < o->array_len; i++)
                         js_free_value_rt(rt, o->array_data[i]);
                     js_free(rt, o->array_data, sizeof(JSValue) * o->array_cap);
+                }
+                /* Free prototype chain (decrement refcount) */
+                if (o->proto) {
+                    o->proto->ref--;
+                    if (o->proto->ref <= 0) {
+                        /* Create a temporary value to free the proto object */
+                        JSValue proto_val = JS_MKVAL(JS_TAG_OBJECT, (uintptr_t)o->proto);
+                        js_free_value_rt(rt, proto_val);
+                    }
                 }
                 js_free(rt, o, sizeof(JSObject_s));
             }
@@ -493,8 +480,9 @@ static int obj_set_prop(JSRuntime *rt, JSObject_s *o, const char *name,
     }
     /* Add new */
     JSProp *p = (JSProp *)js_malloc(rt, sizeof(JSProp));
-    if (!p) return -1;
+    if (!p) { js_free_value_rt(rt, val); return -1; }
     p->name = js_strdup(rt, name);
+    if (!p->name) { js_free(rt, p, sizeof(JSProp)); js_free_value_rt(rt, val); return -1; }
     p->value = val;
     p->next = o->props;
     o->props = p;
@@ -565,8 +553,9 @@ static int scope_define(JSRuntime *rt, Scope *scope, const char *name,
         }
     }
     JSProp *p = (JSProp *)js_malloc(rt, sizeof(JSProp));
-    if (!p) return -1;
+    if (!p) { js_free_value_rt(rt, val); return -1; }
     p->name = js_strdup(rt, name);
+    if (!p->name) { js_free(rt, p, sizeof(JSProp)); js_free_value_rt(rt, val); return -1; }
     p->value = val;
     p->next = scope->vars;
     scope->vars = p;
@@ -909,47 +898,6 @@ static Token lex_next(Lexer *lex) {
     return tok;
 }
 
-static Token lex_peek(Lexer *lex) {
-    if (lex->has_peek) return lex->peek;
-    /* Save state */
-    int save_pos = lex->pos;
-    int save_line = lex->line;
-    Token save_current = lex->current;
-    lex->peek = lex_next(lex);
-    lex->has_peek = 1;
-    /* The lex_next consumed, but peek stores it - we DON'T restore pos
-       because has_peek will make lex_next return the stored peek */
-    /* Actually we need to restore because lex_next also modified pos */
-    /* Let's fix: lex_peek should just look ahead without consuming */
-    /* Simpler approach: save and restore */
-    lex->pos = save_pos;
-    lex->line = save_line;
-    lex->current = save_current;
-    /* Re-scan to get the peek token properly */
-    int save_pos2 = lex->pos;
-    int save_line2 = lex->line;
-    Token save_cur2 = lex->current;
-    Token peeked = lex_next(lex);
-    lex->peek = peeked;
-    lex->has_peek = 1;
-    lex->pos = save_pos2;
-    lex->line = save_line2;
-    lex->current = save_cur2;
-    return lex->peek;
-}
-
-/* Helper: check if current token matches type and advance */
-static int lex_match(Lexer *lex, TokenType type) {
-    lex_next(lex);
-    return lex->current.type == type;
-}
-
-/* Helper: expect a token type, error if mismatch */
-static int lex_expect(Lexer *lex, TokenType type) {
-    lex_next(lex);
-    return lex->current.type == type;
-}
-
 
 /* ================================================================
  * Section 8: Parser + Evaluator (Combined)
@@ -964,6 +912,149 @@ static JSValue eval_assignment(JSContext *ctx, Lexer *lex);
 static JSValue eval_statement(JSContext *ctx, Lexer *lex);
 static JSValue eval_block(JSContext *ctx, Lexer *lex);
 static JSValue eval_statement_list(JSContext *ctx, Lexer *lex);
+
+/* ── Token-level skip functions (advance lexer without evaluating) ── */
+
+/* Skip balanced parentheses: expects lexer on '(', leaves after ')' */
+static void skip_parens(Lexer *lex) {
+    if (lex->current.type != TOK_LPAREN) return;
+    int depth = 1;
+    lex_next(lex);
+    while (!lex_eof(lex) && depth > 0) {
+        if (lex->current.type == TOK_LPAREN) depth++;
+        else if (lex->current.type == TOK_RPAREN) depth--;
+        if (depth > 0) lex_next(lex);
+    }
+    if (lex->current.type == TOK_RPAREN) lex_next(lex);
+}
+
+/* Skip a balanced block: expects lexer on '{', leaves after '}' */
+static void skip_block(Lexer *lex) {
+    if (lex->current.type != TOK_LBRACE) return;
+    int depth = 1;
+    lex_next(lex);
+    while (!lex_eof(lex) && depth > 0) {
+        if (lex->current.type == TOK_LBRACE) depth++;
+        else if (lex->current.type == TOK_RBRACE) depth--;
+        if (depth > 0) lex_next(lex);
+    }
+    if (lex->current.type == TOK_RBRACE) lex_next(lex);
+}
+
+/* Skip a single statement without evaluating it.
+ * Handles blocks, if/else, for, while, do-while, try/catch/finally,
+ * switch, and simple expression statements. */
+static void skip_statement(Lexer *lex) {
+    if (lex_eof(lex)) return;
+
+    /* Block */
+    if (lex->current.type == TOK_LBRACE) {
+        skip_block(lex);
+        return;
+    }
+
+    /* if/else */
+    if (lex->current.type == TOK_IF) {
+        lex_next(lex);
+        skip_parens(lex);
+        skip_statement(lex);
+        if (lex->current.type == TOK_ELSE) {
+            lex_next(lex);
+            skip_statement(lex);
+        }
+        return;
+    }
+
+    /* for / while */
+    if (lex->current.type == TOK_FOR || lex->current.type == TOK_WHILE) {
+        lex_next(lex);
+        skip_parens(lex);
+        skip_statement(lex);
+        return;
+    }
+
+    /* do-while */
+    if (lex->current.type == TOK_DO) {
+        lex_next(lex);
+        skip_statement(lex);
+        if (lex->current.type == TOK_WHILE) {
+            lex_next(lex);
+            skip_parens(lex);
+        }
+        if (lex->current.type == TOK_SEMICOLON) lex_next(lex);
+        return;
+    }
+
+    /* try/catch/finally */
+    if (lex->current.type == TOK_TRY) {
+        lex_next(lex);
+        skip_block(lex);
+        if (lex->current.type == TOK_CATCH) {
+            lex_next(lex);
+            if (lex->current.type == TOK_LPAREN) skip_parens(lex);
+            skip_block(lex);
+        }
+        if (lex->current.type == TOK_FINALLY) {
+            lex_next(lex);
+            skip_block(lex);
+        }
+        return;
+    }
+
+    /* switch */
+    if (lex->current.type == TOK_SWITCH) {
+        lex_next(lex);
+        skip_parens(lex);
+        skip_block(lex);
+        return;
+    }
+
+    /* Simple statement: consume until ';' or '}' (don't consume '}') */
+    {
+        int depth = 0;
+        while (!lex_eof(lex)) {
+            if (lex->current.type == TOK_EOF) break;
+            if (lex->current.type == TOK_LBRACE) depth++;
+            else if (lex->current.type == TOK_RBRACE) {
+                if (depth > 0) depth--;
+                else break;
+            } else if (lex->current.type == TOK_SEMICOLON && depth == 0) {
+                lex_next(lex);
+                return;
+            }
+            lex_next(lex);
+        }
+        /* Normalize EOF state */
+        if (lex_eof(lex) && lex->current.type != TOK_EOF) {
+            lex_next(lex);
+        }
+    }
+}
+
+/* Skip a single expression without evaluating it.
+ * Used for ternary branches that should not execute. */
+static void skip_expression(Lexer *lex) {
+    int depth = 0;
+    while (!lex_eof(lex)) {
+        TokenType t = lex->current.type;
+        if (t == TOK_EOF) break;
+        if (t == TOK_LPAREN || t == TOK_LBRACKET || t == TOK_LBRACE) depth++;
+        else if (t == TOK_RPAREN || t == TOK_RBRACKET || t == TOK_RBRACE) {
+            if (depth > 0) depth--;
+            else break; /* unmatched close — belongs to parent context */
+        } else if (depth == 0) {
+            /* Stop at expression terminators */
+            if (t == TOK_COMMA || t == TOK_SEMICOLON || t == TOK_COLON)
+                break;
+        }
+        lex_next(lex);
+    }
+    /* Normalize: if lexer position is past the end but current token isn't EOF,
+     * advance once more to set current to TOK_EOF */
+    if (lex_eof(lex) && lex->current.type != TOK_EOF) {
+        lex_next(lex);
+    }
+}
 
 /* Check if context has an unhandled exception */
 static int has_exception(JSContext *ctx) {
@@ -1561,7 +1652,8 @@ static JSValue eval_primary(JSContext *ctx, Lexer *lex, LValue *lv) {
         }
         case TOK_DELETE: {
             lex_next(lex);
-            eval_primary(ctx, lex, NULL); /* evaluate and discard */
+            JSValue del_val = eval_primary(ctx, lex, NULL);
+            JS_FreeValue(ctx, del_val);
             return JS_TRUE;
         }
         default:
@@ -1993,11 +2085,12 @@ static JSValue eval_postfix(JSContext *ctx, Lexer *lex, LValue *lv) {
                     } else {
                         result = js_eval_source(ctx, f->u.js.source,
                                                f->u.js.source_len);
-                        /* Check if function returned via ctx_has_return */
-                        if (ctx_has_return) {
+                        /* Check if function returned via ctx->has_return */
+                        if (ctx->has_return) {
                             JS_FreeValue(ctx, result);
-                            result = js_dup_value(ctx_return_value);
-                            ctx_has_return = 0;
+                            result = ctx->return_value; /* take ownership */
+                            ctx->return_value = JS_UNDEFINED;
+                            ctx->has_return = 0;
                         }
                     }
 
@@ -2092,19 +2185,32 @@ static JSValue eval_expression(JSContext *ctx, Lexer *lex, int min_prec) {
 
         /* Short-circuit for && and || */
         if (op == TOK_AND) {
-            if (!js_is_truthy(left)) return left;
+            if (!js_is_truthy(left)) {
+                /* Short-circuit: consume right operand but keep left value */
+                JSValue rhs = eval_expression(ctx, lex, prec + 1);
+                JS_FreeValue(ctx, rhs);
+                continue;
+            }
             JS_FreeValue(ctx, left);
             left = eval_expression(ctx, lex, prec + 1);
             continue;
         }
         if (op == TOK_OR) {
-            if (js_is_truthy(left)) return left;
+            if (js_is_truthy(left)) {
+                JSValue rhs = eval_expression(ctx, lex, prec + 1);
+                JS_FreeValue(ctx, rhs);
+                continue;
+            }
             JS_FreeValue(ctx, left);
             left = eval_expression(ctx, lex, prec + 1);
             continue;
         }
         if (op == TOK_NULLISH) {
-            if (!JS_IsNull(left) && !JS_IsUndefined(left)) return left;
+            if (!JS_IsNull(left) && !JS_IsUndefined(left)) {
+                JSValue rhs = eval_expression(ctx, lex, prec + 1);
+                JS_FreeValue(ctx, rhs);
+                continue;
+            }
             JS_FreeValue(ctx, left);
             left = eval_expression(ctx, lex, prec + 1);
             continue;
@@ -2158,37 +2264,6 @@ static JSValue eval_expression(JSContext *ctx, Lexer *lex, int min_prec) {
         JS_FreeValue(ctx, right);
         left = result;
     }
-}
-
-/* Conditional expression (ternary) */
-static JSValue eval_conditional(JSContext *ctx, Lexer *lex) {
-    JSValue val = eval_expression(ctx, lex, 1);
-    if (has_exception(ctx)) return JS_EXCEPTION;
-
-    if (lex->current.type == TOK_QUESTION) {
-        lex_next(lex); /* skip ? */
-        int cond = js_is_truthy(val);
-        JS_FreeValue(ctx, val);
-
-        if (cond) {
-            val = eval_assignment(ctx, lex);
-            if (lex->current.type == TOK_COLON) {
-                lex_next(lex);
-                JSValue discard = eval_assignment(ctx, lex);
-                JS_FreeValue(ctx, discard);
-            }
-        } else {
-            JSValue discard = eval_assignment(ctx, lex);
-            JS_FreeValue(ctx, discard);
-            if (lex->current.type == TOK_COLON) {
-                lex_next(lex);
-                val = eval_assignment(ctx, lex);
-            } else {
-                val = JS_UNDEFINED;
-            }
-        }
-    }
-    return val;
 }
 
 /* Assignment expression */
@@ -2266,12 +2341,10 @@ static JSValue eval_assignment(JSContext *ctx, Lexer *lex) {
             left = eval_assignment(ctx, lex);
             if (lex->current.type == TOK_COLON) {
                 lex_next(lex);
-                JSValue discard = eval_assignment(ctx, lex);
-                JS_FreeValue(ctx, discard);
+                skip_expression(lex); /* skip false branch without evaluating */
             }
         } else {
-            JSValue discard = eval_assignment(ctx, lex);
-            JS_FreeValue(ctx, discard);
+            skip_expression(lex); /* skip true branch without evaluating */
             if (lex->current.type == TOK_COLON) {
                 lex_next(lex);
                 left = eval_assignment(ctx, lex);
@@ -2327,21 +2400,33 @@ static JSValue eval_assignment(JSContext *ctx, Lexer *lex) {
 
             lex_next(lex);
 
-            /* Short-circuit */
+            /* Short-circuit (consume right operand, then break for ternary check) */
             if (op2 == TOK_AND) {
-                if (!js_is_truthy(left)) return left;
+                if (!js_is_truthy(left)) {
+                    JSValue rhs = eval_expression(ctx, lex, prec + 1);
+                    JS_FreeValue(ctx, rhs);
+                    break; /* ternary may follow */
+                }
                 JS_FreeValue(ctx, left);
                 left = eval_expression(ctx, lex, prec + 1);
                 continue;
             }
             if (op2 == TOK_OR) {
-                if (js_is_truthy(left)) return left;
+                if (js_is_truthy(left)) {
+                    JSValue rhs = eval_expression(ctx, lex, prec + 1);
+                    JS_FreeValue(ctx, rhs);
+                    break;
+                }
                 JS_FreeValue(ctx, left);
                 left = eval_expression(ctx, lex, prec + 1);
                 continue;
             }
             if (op2 == TOK_NULLISH) {
-                if (!JS_IsNull(left) && !JS_IsUndefined(left)) return left;
+                if (!JS_IsNull(left) && !JS_IsUndefined(left)) {
+                    JSValue rhs = eval_expression(ctx, lex, prec + 1);
+                    JS_FreeValue(ctx, rhs);
+                    break;
+                }
                 JS_FreeValue(ctx, left);
                 left = eval_expression(ctx, lex, prec + 1);
                 continue;
@@ -2398,12 +2483,10 @@ static JSValue eval_assignment(JSContext *ctx, Lexer *lex) {
             left = eval_assignment(ctx, lex);
             if (lex->current.type == TOK_COLON) {
                 lex_next(lex);
-                JSValue discard = eval_assignment(ctx, lex);
-                JS_FreeValue(ctx, discard);
+                skip_expression(lex); /* skip false branch without evaluating */
             }
         } else {
-            JSValue discard = eval_assignment(ctx, lex);
-            JS_FreeValue(ctx, discard);
+            skip_expression(lex); /* skip true branch without evaluating */
             if (lex->current.type == TOK_COLON) {
                 lex_next(lex);
                 left = eval_assignment(ctx, lex);
@@ -2513,8 +2596,12 @@ static JSValue eval_statement(JSContext *ctx, Lexer *lex) {
             val = eval_assignment(ctx, lex);
         }
         if (lex->current.type == TOK_SEMICOLON) lex_next(lex);
-        ctx_return_value = js_dup_value(val);
-        ctx_has_return = 1;
+        /* Free previous return value if one was set (e.g. nested return) */
+        if (ctx->has_return) {
+            JS_FreeValue(ctx, ctx->return_value);
+        }
+        ctx->return_value = js_dup_value(val);
+        ctx->has_return = 1;
         return val;
     }
 
@@ -2531,57 +2618,14 @@ static JSValue eval_statement(JSContext *ctx, Lexer *lex) {
         JSValue result = JS_UNDEFINED;
         if (is_true) {
             result = eval_statement(ctx, lex);
-            /* Skip else branch */
+            /* Skip else branch without evaluating */
             if (lex->current.type == TOK_ELSE) {
                 lex_next(lex);
-                /* Need to skip the else body */
-                if (lex->current.type == TOK_LBRACE) {
-                    int depth = 1;
-                    lex_next(lex);
-                    while (!lex_eof(lex) && depth > 0) {
-                        if (lex->current.type == TOK_LBRACE) depth++;
-                        else if (lex->current.type == TOK_RBRACE) depth--;
-                        if (depth > 0) lex_next(lex);
-                    }
-                    if (lex->current.type == TOK_RBRACE) lex_next(lex);
-                } else if (lex->current.type == TOK_IF) {
-                    /* else if - skip it */
-                    JSValue skip = eval_statement(ctx, lex);
-                    JS_FreeValue(ctx, skip);
-                    /* Restore the result since we skipped */
-                } else {
-                    /* Skip single statement */
-                    JSValue skip = eval_statement(ctx, lex);
-                    JS_FreeValue(ctx, skip);
-                }
+                skip_statement(lex);
             }
         } else {
-            /* Skip true branch */
-            if (lex->current.type == TOK_LBRACE) {
-                int depth = 1;
-                lex_next(lex);
-                while (!lex_eof(lex) && depth > 0) {
-                    if (lex->current.type == TOK_LBRACE) depth++;
-                    else if (lex->current.type == TOK_RBRACE) depth--;
-                    if (depth > 0) lex_next(lex);
-                }
-                if (lex->current.type == TOK_RBRACE) lex_next(lex);
-            } else {
-                /* Skip single statement by consuming tokens until ; or } */
-                int depth = 0;
-                while (!lex_eof(lex)) {
-                    if (lex->current.type == TOK_LBRACE) depth++;
-                    else if (lex->current.type == TOK_RBRACE) {
-                        if (depth > 0) depth--;
-                        else break;
-                    }
-                    else if (lex->current.type == TOK_SEMICOLON && depth == 0) {
-                        lex_next(lex);
-                        break;
-                    }
-                    lex_next(lex);
-                }
-            }
+            /* Skip true branch without evaluating */
+            skip_statement(lex);
             /* Execute else branch */
             if (lex->current.type == TOK_ELSE) {
                 lex_next(lex);
@@ -2630,7 +2674,7 @@ static JSValue eval_statement(JSContext *ctx, Lexer *lex) {
             JSValue body_result = eval_statement(ctx, lex);
             int is_break = JS_IS_BREAK(body_result);
             int is_continue = JS_IS_CONTINUE(body_result);
-            int is_return = ctx_has_return;
+            int is_return = ctx->has_return;
             if (!is_break && !is_continue) JS_FreeValue(ctx, body_result);
             if (is_break || is_return || has_exception(ctx)) break;
             /* We'll reset to cond_pos at top of loop */
@@ -2720,7 +2764,7 @@ static JSValue eval_statement(JSContext *ctx, Lexer *lex) {
 
         int is_break = JS_IS_BREAK(body_result);
         if (!is_break && !JS_IS_CONTINUE(body_result)) JS_FreeValue(ctx, body_result);
-        if (is_break || ctx_has_return || has_exception(ctx)) return JS_UNDEFINED;
+        if (is_break || ctx->has_return || has_exception(ctx)) return JS_UNDEFINED;
 
         /* Loop */
         for (int iter = 0; iter < 100000; iter++) {
@@ -2749,7 +2793,7 @@ static JSValue eval_statement(JSContext *ctx, Lexer *lex) {
             body_result = eval_statement(ctx, lex);
             is_break = JS_IS_BREAK(body_result);
             if (!is_break && !JS_IS_CONTINUE(body_result)) JS_FreeValue(ctx, body_result);
-            if (is_break || ctx_has_return || has_exception(ctx)) break;
+            if (is_break || ctx->has_return || has_exception(ctx)) break;
         }
 
         /* Restore position to after the for loop */
@@ -2771,7 +2815,7 @@ static JSValue eval_statement(JSContext *ctx, Lexer *lex) {
             JSValue body = eval_statement(ctx, lex);
             int is_break = JS_IS_BREAK(body);
             if (!is_break && !JS_IS_CONTINUE(body)) JS_FreeValue(ctx, body);
-            if (is_break || ctx_has_return || has_exception(ctx)) break;
+            if (is_break || ctx->has_return || has_exception(ctx)) break;
 
             if (lex->current.type == TOK_WHILE) lex_next(lex);
             if (lex->current.type == TOK_LPAREN) lex_next(lex);
@@ -2811,15 +2855,24 @@ static JSValue eval_statement(JSContext *ctx, Lexer *lex) {
     /* Try/catch/finally */
     if (tok == TOK_TRY) {
         lex_next(lex);
-        /* Execute try block */
-        (void)0; /* save/restore exception state around try block */
+        /* Save and clear exception state before try block */
+        int saved_has_exception = ctx->has_exception;
+        JSValue saved_exception = ctx->current_exception;
         ctx->has_exception = 0;
         ctx->current_exception = JS_UNDEFINED;
+
+        /* Save return state */
+        int saved_has_return = ctx->has_return;
+        JSValue saved_return_value = ctx->return_value;
+        ctx->has_return = 0;
+        ctx->return_value = JS_UNDEFINED;
 
         JSValue try_result = eval_block(ctx, lex);
 
         int had_exception = ctx->has_exception;
         JSValue exc_val = ctx->current_exception;
+        int try_had_return = ctx->has_return;
+        JSValue try_return_value = ctx->return_value;
 
         if (had_exception) {
             ctx->has_exception = 0;
@@ -2878,6 +2931,39 @@ static JSValue eval_statement(JSContext *ctx, Lexer *lex) {
             JS_FreeValue(ctx, finally_result);
         }
 
+        /* Restore saved exception state if no new exception */
+        if (!ctx->has_exception && saved_has_exception) {
+            ctx->has_exception = saved_has_exception;
+            ctx->current_exception = saved_exception;
+        } else {
+            JS_FreeValue(ctx, saved_exception);
+        }
+
+        /* Preserve return signal from try block */
+        if (try_had_return && !had_exception) {
+            ctx->has_return = 1;
+            ctx->return_value = try_return_value;
+            JS_FreeValue(ctx, try_result);
+            /* Free old saved return state */
+            if (saved_has_return)
+                JS_FreeValue(ctx, saved_return_value);
+            return JS_UNDEFINED;
+        }
+        /* Restore previous return state if try didn't return */
+        if (saved_has_return && !ctx->has_return) {
+            ctx->has_return = saved_has_return;
+            ctx->return_value = saved_return_value;
+        } else if (saved_has_return) {
+            JS_FreeValue(ctx, saved_return_value);
+        }
+        if (try_had_return && had_exception) {
+            JS_FreeValue(ctx, try_return_value);
+        }
+
+        /* Propagate break/continue from try block */
+        if (JS_IS_BREAK(try_result) || JS_IS_CONTINUE(try_result)) {
+            return try_result;
+        }
         JS_FreeValue(ctx, try_result);
         return JS_UNDEFINED;
     }
@@ -2997,7 +3083,7 @@ static JSValue eval_block(JSContext *ctx, Lexer *lex) {
     while (lex->current.type != TOK_RBRACE && lex->current.type != TOK_EOF) {
         JS_FreeValue(ctx, last);
         last = eval_statement(ctx, lex);
-        if (has_exception(ctx) || ctx_has_return ||
+        if (has_exception(ctx) || ctx->has_return ||
             JS_IS_BREAK(last) || JS_IS_CONTINUE(last)) break;
     }
     if (lex->current.type == TOK_RBRACE) lex_next(lex);
@@ -3013,7 +3099,7 @@ static JSValue eval_statement_list(JSContext *ctx, Lexer *lex) {
     while (lex->current.type != TOK_EOF && lex->current.type != TOK_RBRACE) {
         JS_FreeValue(ctx, last);
         last = eval_statement(ctx, lex);
-        if (has_exception(ctx) || ctx_has_return ||
+        if (has_exception(ctx) || ctx->has_return ||
             JS_IS_BREAK(last) || JS_IS_CONTINUE(last)) break;
     }
     return last;
@@ -3107,8 +3193,8 @@ JSValue JS_Eval(JSContext *ctx, const char *input, size_t input_len,
 
     /* Reset stats */
     memset(&ctx->stats, 0, sizeof(JSExecStats));
-    ctx_has_return = 0;
-    ctx_return_value = JS_UNDEFINED;
+    ctx->has_return = 0;
+    ctx->return_value = JS_UNDEFINED;
 
     struct timespec start_time;
     clock_gettime(CLOCK_MONOTONIC, &start_time);
@@ -3123,10 +3209,11 @@ JSValue JS_Eval(JSContext *ctx, const char *input, size_t input_len,
     JSValue result = js_eval_source(ctx, input, input_len);
 
     /* If function returned, use the return value */
-    if (ctx_has_return) {
+    if (ctx->has_return) {
         JS_FreeValue(ctx, result);
-        result = ctx_return_value;
-        ctx_has_return = 0;
+        result = ctx->return_value; /* take ownership */
+        ctx->return_value = JS_UNDEFINED;
+        ctx->has_return = 0;
     }
 
     struct timespec end_time;
@@ -3363,18 +3450,39 @@ int JS_GetExecStats(JSContext *ctx, JSExecStats *stats) {
 static void output_buf_init(JSContext *ctx) {
     ctx->output_cap = 4096;
     ctx->output_buf = (char *)malloc(ctx->output_cap);
+    if (!ctx->output_buf) { ctx->output_cap = 0; return; }
     ctx->output_buf[0] = '\0';
     ctx->output_len = 0;
 }
 
 static void output_buf_append(JSContext *ctx, const char *type, const char *data) {
+    if (!ctx->output_buf) return;
     size_t type_len = strlen(type);
     size_t data_len = data ? strlen(data) : 0;
+    /* Sanitize embedded newlines in data to prevent output buffer protocol corruption */
+    char *sanitized = NULL;
+    if (data && data_len > 0) {
+        for (size_t i = 0; i < data_len; i++) {
+            if (data[i] == '\n') {
+                sanitized = (char *)malloc(data_len + 1);
+                if (!sanitized) return;
+                memcpy(sanitized, data, data_len);
+                for (size_t j = i; j < data_len; j++) {
+                    if (sanitized[j] == '\n') sanitized[j] = ' ';
+                }
+                sanitized[data_len] = '\0';
+                data = sanitized;
+                break;
+            }
+        }
+    }
     size_t needed = ctx->output_len + type_len + 1 + data_len + 1; /* type:data\n */
     if (needed >= ctx->output_cap) {
         size_t new_cap = ctx->output_cap * 2;
         while (new_cap < needed + 1) new_cap *= 2;
-        ctx->output_buf = (char *)realloc(ctx->output_buf, new_cap);
+        char *new_buf = (char *)realloc(ctx->output_buf, new_cap);
+        if (!new_buf) { free(sanitized); return; }
+        ctx->output_buf = new_buf;
         ctx->output_cap = new_cap;
     }
     memcpy(ctx->output_buf + ctx->output_len, type, type_len);
@@ -3386,6 +3494,7 @@ static void output_buf_append(JSContext *ctx, const char *type, const char *data
     }
     ctx->output_buf[ctx->output_len++] = '\n';
     ctx->output_buf[ctx->output_len] = '\0';
+    free(sanitized);
 }
 
 const char *JS_GetOutputBuffer(JSContext *ctx) {
@@ -3399,9 +3508,10 @@ void JS_ClearOutputBuffer(JSContext *ctx) {
     ctx->output_len = 0;
 }
 
-/* Helper: extract string argument from JSValue */
+/* Helper: extract string argument from JSValue.
+ * Returns a heap-allocated string (free with JS_FreeCString) or NULL. */
 static const char *extract_arg_string(JSContext *ctx, int argc, JSValueConst *argv, int idx) {
-    if (idx >= argc) return "";
+    if (idx >= argc) return NULL;
     return JS_ToCString(ctx, argv[idx]);
 }
 
@@ -3512,10 +3622,10 @@ static JSValue js_get_element_by_id(JSContext *ctx, JSValueConst this_val,
     char cmd[256];
     snprintf(cmd, sizeof(cmd), "getElementById:%s", id);
     output_buf_append(ctx, "DOM_QUERY", cmd);
-    JS_FreeCString(ctx, id);
-    /* Return a placeholder object that can track property assignments */
+    /* Create placeholder object BEFORE freeing the id string */
     JSValue obj = JS_NewObject(ctx);
     JSValue id_val = JS_NewString(ctx, id);
+    JS_FreeCString(ctx, id);
     JS_SetPropertyStr(ctx, obj, "__element_id__", id_val);
     return obj;
 }
