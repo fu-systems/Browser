@@ -226,7 +226,7 @@ const voidElements = {
 };
 
 /// Tags whose content Pane ignores entirely for rendering.
-const ignoredElements = {'script', 'noscript', 'template'};
+const ignoredElements = {'script', 'template'};
 
 /// Block-level elements (used by layout engine).
 const blockElements = {

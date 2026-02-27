@@ -86,7 +86,7 @@ class StyledNode {
     final d = prop('display');
     if (d == 'none') return Display.none;
     if (d == 'inline') return Display.inline;
-    if (d == 'block') return Display.block;
+    if (d == 'block' || d == 'list-item') return Display.block;
     if (d == 'inline-block') return Display.inlineBlock;
     if (d == 'flex') return Display.flex;
     if (d == 'inline-flex') return Display.inlineFlex;
@@ -499,7 +499,6 @@ const _inheritableProperties = {
   'font-style',
   'line-height',
   'text-align',
-  'text-decoration',
   'text-transform',
   'letter-spacing',
   'word-spacing',
@@ -564,7 +563,11 @@ void _applyDefaults(Element element, Map<String, String> props) {
       props['margin-top'] = '16px';
       props['margin-bottom'] = '16px';
     case 'a':
-      props['color'] = '#0000EE';
+      // Use body link color if set via <body link="...">, otherwise default blue.
+      final bodyLinkColor = props['--body-link-color'];
+      props['color'] = (bodyLinkColor != null && bodyLinkColor.isNotEmpty)
+          ? bodyLinkColor
+          : '#0000EE';
       props['text-decoration'] = 'underline';
       props['cursor'] = 'pointer';
     // ── Inline text semantics ──
@@ -626,7 +629,7 @@ void _applyDefaults(Element element, Map<String, String> props) {
       props['padding-left'] = '40px';
       props['list-style-type'] = 'disc';
     case 'li':
-      props['display'] = 'block';
+      props['display'] = 'list-item';
     case 'dd':
       props['margin-left'] = '40px';
 
@@ -638,10 +641,21 @@ void _applyDefaults(Element element, Map<String, String> props) {
     case 'body':
       props.putIfAbsent('font-family', () => 'serif');
       props.putIfAbsent('font-size', () => '16px');
-      props.putIfAbsent('color', () => '#000000');
       props.putIfAbsent('margin', () => '8px');
+      // Legacy <body> color attributes.
+      final textColor = element.attributes['text'];
+      if (textColor != null && textColor.isNotEmpty) {
+        props.putIfAbsent('color', () => textColor);
+      } else {
+        props.putIfAbsent('color', () => '#000000');
+      }
+      final linkColor = element.attributes['link'];
+      if (linkColor != null && linkColor.isNotEmpty) {
+        props['--body-link-color'] = linkColor;
+      }
     case 'center':
       props['text-align'] = 'center';
+      props['display'] = 'block';
 
     // ── Legacy formatting ──
     case 'tt':
@@ -649,15 +663,15 @@ void _applyDefaults(Element element, Map<String, String> props) {
     case 'font':
       final face = element.attributes['face'];
       if (face != null && face.isNotEmpty) {
-        props['font-family'] = face.split(',').first.trim();
+        props['font-family'] = face;
       }
       final size = element.attributes['size'];
       if (size != null && size.isNotEmpty) {
         props['font-size'] = _htmlFontSize(size);
       }
-      final color = element.attributes['color'];
-      if (color != null && color.isNotEmpty) {
-        props['color'] = color;
+      final fontColor = element.attributes['color'];
+      if (fontColor != null && fontColor.isNotEmpty) {
+        props['color'] = fontColor;
       }
 
     // ── Tables ──
@@ -702,11 +716,36 @@ void _applyDefaults(Element element, Map<String, String> props) {
       props['padding-left'] = '4px';
       props['padding-right'] = '4px';
 
+    // ── Form elements ──
+    case 'input':
+      props['display'] = 'inline-block';
+      props['font-family'] = 'sans-serif';
+      props['font-size'] = '13px';
+    case 'button':
+      props['display'] = 'inline-block';
+      props['font-family'] = 'sans-serif';
+      props['font-size'] = '13px';
+      props['text-align'] = 'center';
+    case 'select':
+      props['display'] = 'inline-block';
+      props['font-family'] = 'sans-serif';
+      props['font-size'] = '13px';
+    case 'textarea':
+      props['display'] = 'inline-block';
+      props['font-family'] = 'monospace';
+      props['font-size'] = '13px';
+      props['white-space'] = 'pre-wrap';
+
     // ── Interactive ──
     case 'dialog':
       props['border'] = '1px solid #000000';
       props['padding'] = '16px';
       props['background-color'] = '#ffffff';
+  }
+
+  // The HTML `hidden` attribute forces display: none.
+  if (element.attributes.containsKey('hidden')) {
+    props['display'] = 'none';
   }
 
   // Apply HTML width/height attributes as presentational hints.
@@ -736,6 +775,16 @@ void _applyHtmlAttributes(Element element, Map<String, String> props) {
   final valign = element.attributes['valign'];
   if (valign != null && valign.isNotEmpty && !props.containsKey('vertical-align')) {
     props['vertical-align'] = valign.toLowerCase();
+  }
+  // border attribute → border (for images, tables).
+  final border = element.attributes['border'];
+  if (border != null && border.isNotEmpty && !props.containsKey('border')) {
+    final bw = int.tryParse(border) ?? 0;
+    if (bw > 0) {
+      props['border'] = '${bw}px solid #000000';
+    } else {
+      props['border'] = 'none';
+    }
   }
 }
 

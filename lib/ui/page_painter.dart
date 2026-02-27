@@ -961,15 +961,28 @@ double _parsePx(String value) {
 }
 
 String _mapFontFamily(String family) {
-  switch (family.toLowerCase().split(',').first.trim()) {
-    case 'serif':
+  // Take the first font in a comma-separated list.
+  final first = family.split(',').first.trim().toLowerCase()
+      .replaceAll("'", '').replaceAll('"', '');
+  switch (first) {
+    case 'serif' || 'times' || 'times new roman' || 'georgia' || 'palatino' || 'garamond':
       return 'Serif';
-    case 'sans-serif':
+    case 'sans-serif' || 'arial' || 'helvetica' || 'verdana' || 'tahoma' ||
+         'trebuchet ms' || 'lucida grande' || 'lucida sans' || 'segoe ui' ||
+         'roboto' || 'noto sans' || 'open sans' || 'lato' || 'inter':
       return 'Sans';
-    case 'monospace':
+    case 'monospace' || 'courier' || 'courier new' || 'consolas' ||
+         'lucida console' || 'monaco' || 'menlo' || 'dejavu sans mono' ||
+         'source code pro' || 'fira code':
       return 'Monospace';
+    case 'cursive' || 'comic sans ms' || 'brush script mt':
+      return 'Serif';
+    case 'fantasy' || 'impact' || 'papyrus':
+      return 'Sans';
+    case 'system-ui' || '-apple-system' || 'blinkmacsystemfont':
+      return 'Sans';
     default:
-      return family;
+      return family.split(',').first.trim();
   }
 }
 

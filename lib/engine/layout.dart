@@ -441,15 +441,20 @@ void _layoutBlock(LayoutBox box, double containerWidth, TextMeasurer measurer) {
   }
 
   // If height was not set explicitly, use content height.
+  // Table, grid, and flex layouts compute their own height internally.
   final heightProp = box.styledNode?.prop('height', '') ?? '';
   if (heightProp.isEmpty || heightProp == 'auto') {
-    double h = 0;
-    for (final child in box.children) {
-      // Skip absolute/fixed children from contributing to height.
-      if (child.position == 'absolute' || child.position == 'fixed') continue;
-      h = math.max(h, child.marginBox.y + child.marginBox.height - box.content.y);
+    if (box.layoutType != LayoutType.table &&
+        box.layoutType != LayoutType.flex &&
+        box.layoutType != LayoutType.grid) {
+      double h = 0;
+      for (final child in box.children) {
+        // Skip absolute/fixed children from contributing to height.
+        if (child.position == 'absolute' || child.position == 'fixed') continue;
+        h = math.max(h, child.marginBox.y + child.marginBox.height - box.content.y);
+      }
+      box.content.height = h;
     }
-    box.content.height = h;
   }
 
   // If this box establishes a BFC (has overflow != visible, or is the root),
@@ -489,6 +494,29 @@ void _computeBoxDimensions(LayoutBox box, double containerWidth) {
       w -= box.padding.left + box.padding.right + box.border.left + box.border.right;
     }
     box.content.width = math.max(0, w);
+
+    // Handle margin: auto for horizontal centering on block elements with explicit width.
+    final marginShorthand = s.prop('margin', '');
+    final marginLeftStr = s.prop('margin-left', '');
+    final marginRightStr = s.prop('margin-right', '');
+    final hasAutoLeft = marginLeftStr == 'auto' || (marginShorthand.contains('auto') && marginLeftStr.isEmpty);
+    final hasAutoRight = marginRightStr == 'auto' || (marginShorthand.contains('auto') && marginRightStr.isEmpty);
+    if (hasAutoLeft && hasAutoRight) {
+      final totalOuter = box.content.width + box.border.left + box.border.right +
+          box.padding.left + box.padding.right;
+      final autoMargin = math.max(0.0, (containerWidth - totalOuter) / 2);
+      box.margin = EdgeSizes(box.margin.top, autoMargin, box.margin.bottom, autoMargin);
+    } else if (hasAutoLeft) {
+      final totalOuter = box.content.width + box.margin.right + box.border.left + box.border.right +
+          box.padding.left + box.padding.right;
+      final autoMargin = math.max(0.0, containerWidth - totalOuter);
+      box.margin = EdgeSizes(box.margin.top, box.margin.right, box.margin.bottom, autoMargin);
+    } else if (hasAutoRight) {
+      final totalOuter = box.content.width + box.margin.left + box.border.left + box.border.right +
+          box.padding.left + box.padding.right;
+      final autoMargin = math.max(0.0, containerWidth - totalOuter);
+      box.margin = EdgeSizes(box.margin.top, autoMargin, box.margin.bottom, box.margin.left);
+    }
   } else {
     box.content.width = containerWidth -
         box.margin.left -
@@ -1200,15 +1228,26 @@ void _layoutFlexColumn(
   }
 }
 
-/// After flex positioning, update all child positions to be relative
-/// to the new parent position.
+/// After flex positioning, offset all sub-children so they are positioned
+/// relative to the parent's final content origin.
 void _relayoutChildPositions(LayoutBox box) {
   if (box.children.isEmpty) return;
-  // Children were laid out with content.x/y = 0, offset them.
+  // Offset all descendant boxes by the difference between the parent's
+  // final position and origin (0,0) where they were originally laid out.
+  final dx = box.content.x;
+  final dy = box.content.y;
+  if (dx == 0 && dy == 0) return;
   for (final child in box.children) {
-    if (child.content.x == 0 && child.content.y == 0) {
-      // Already positioned during layout.
-    }
+    _offsetBoxTree(child, dx, dy);
+  }
+}
+
+/// Recursively offset a box and all its descendants.
+void _offsetBoxTree(LayoutBox box, double dx, double dy) {
+  box.content.x += dx;
+  box.content.y += dy;
+  for (final child in box.children) {
+    _offsetBoxTree(child, dx, dy);
   }
 }
 
@@ -1571,6 +1610,41 @@ void _layoutInlineContent(
   final explicitHeight = box.styledNode?.prop('height', '') ?? '';
   if (explicitHeight.isEmpty || explicitHeight == 'auto') {
     box.content.height = (cursorY - box.content.y) + lineHeight;
+  }
+
+  // Apply text-align: shift each line of text boxes.
+  final textAlign = box.styledNode?.prop('text-align', '') ?? '';
+  if (textAlign == 'center' || textAlign == 'right' || textAlign == 'end') {
+    _applyTextAlign(box, containerWidth, textAlign);
+  }
+}
+
+/// Shift text boxes within a line to implement text-align: center/right.
+void _applyTextAlign(LayoutBox box, double containerWidth, String align) {
+  if (box.children.isEmpty) return;
+
+  // Group children into lines by their Y position.
+  final lines = <double, List<LayoutBox>>{};
+  for (final child in box.children) {
+    final y = child.content.y;
+    lines.putIfAbsent(y, () => []).add(child);
+  }
+
+  for (final lineChildren in lines.values) {
+    if (lineChildren.isEmpty) continue;
+    // Find the rightmost edge of the line.
+    double lineRight = 0;
+    for (final child in lineChildren) {
+      lineRight = math.max(lineRight, child.content.x + child.content.width);
+    }
+    final lineWidth = lineRight - box.content.x;
+    final freeSpace = containerWidth - lineWidth;
+    if (freeSpace <= 0) continue;
+
+    final shift = (align == 'center') ? freeSpace / 2 : freeSpace;
+    for (final child in lineChildren) {
+      child.content.x += shift;
+    }
   }
 }
 
@@ -2054,17 +2128,31 @@ double _parsePx(String value, [double fallback = 0]) {
 }
 
 EdgeSizes _parseEdges(StyledNode s, String property) {
-  // Check shorthand first.
+  // Start from shorthand, then let longhands override.
   final shorthand = s.prop(property, '');
+  double top, right, bottom, left;
   if (shorthand.isNotEmpty) {
-    return _parseShorthand(shorthand);
+    final base = _parseShorthand(shorthand);
+    top = base.top;
+    right = base.right;
+    bottom = base.bottom;
+    left = base.left;
+  } else {
+    top = 0;
+    right = 0;
+    bottom = 0;
+    left = 0;
   }
-  return EdgeSizes(
-    _parsePx(s.prop('$property-top', '0')),
-    _parsePx(s.prop('$property-right', '0')),
-    _parsePx(s.prop('$property-bottom', '0')),
-    _parsePx(s.prop('$property-left', '0')),
-  );
+  // Individual longhands override the shorthand values.
+  final topStr = s.prop('$property-top', '');
+  final rightStr = s.prop('$property-right', '');
+  final bottomStr = s.prop('$property-bottom', '');
+  final leftStr = s.prop('$property-left', '');
+  if (topStr.isNotEmpty) top = _parsePx(topStr);
+  if (rightStr.isNotEmpty) right = _parsePx(rightStr);
+  if (bottomStr.isNotEmpty) bottom = _parsePx(bottomStr);
+  if (leftStr.isNotEmpty) left = _parsePx(leftStr);
+  return EdgeSizes(top, right, bottom, left);
 }
 
 EdgeSizes _parseShorthand(String value) {

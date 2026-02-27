@@ -56,7 +56,7 @@ class HtmlParser {
 
     // Skip doctype if present.
     _skipWhitespace();
-    if (_startsWith('<!') || _startsWith('<!')) {
+    if (_startsWith('<!') || _startsWith('<?')) {
       _skipDoctype();
     }
 
@@ -133,8 +133,14 @@ class HtmlParser {
   List<Node> _parseNodes(String? parentTag) {
     final nodes = <Node>[];
     while (!_eof) {
-      _skipWhitespace();
-      if (_eof) break;
+      // Preserve inter-element whitespace as collapsed text nodes
+      // so that inline elements retain spacing (e.g., <b>A</b> <b>B</b>).
+      if (_isWhitespace(_current)) {
+        _consumeWhile(_isWhitespace);
+        // Add a single-space text node to preserve inline spacing.
+        nodes.add(Text(' '));
+        if (_eof) break;
+      }
 
       // Check for closing tag for our parent.
       if (_startsWith('</')) {
@@ -164,8 +170,9 @@ class HtmlParser {
         continue;
       }
 
-      // Check for opening tag.
-      if (_current == '<' && _peek(1) != '' && _peek(1) != ' ') {
+      // Check for opening tag — must start with < followed by a letter or /.
+      if (_current == '<' && _peek(1) != '' &&
+          (RegExp(r'[a-zA-Z/!?]').hasMatch(_peek(1)))) {
         // Peek at the tag name to check if it should auto-close the parent.
         if (parentTag != null && !_startsWith('</') && !_startsWith('<!')) {
           final saved = _pos;
