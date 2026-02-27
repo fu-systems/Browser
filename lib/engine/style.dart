@@ -92,6 +92,11 @@ class StyledNode {
     if (d == 'inline-flex') return Display.inlineFlex;
     if (d == 'grid') return Display.grid;
     if (d == 'inline-grid') return Display.inlineGrid;
+    if (d == 'table') return Display.table;
+    if (d == 'inline-table') return Display.inlineTable;
+    if (d == 'table-row') return Display.tableRow;
+    if (d == 'table-cell') return Display.tableCell;
+    if (d == 'table-row-group' || d == 'table-header-group' || d == 'table-footer-group') return Display.tableRowGroup;
     // Default: block for block elements, inline otherwise.
     if (node is Element) {
       return blockElements.contains((node as Element).tagName)
@@ -102,7 +107,10 @@ class StyledNode {
   }
 }
 
-enum Display { block, inline, inlineBlock, none, flex, inlineFlex, grid, inlineGrid }
+enum Display {
+  block, inline, inlineBlock, none, flex, inlineFlex, grid, inlineGrid,
+  table, inlineTable, tableRow, tableCell, tableRowGroup,
+}
 
 // ── Style computation ───────────────────────────────────────────────
 
@@ -128,6 +136,7 @@ StyledNode _styleNode(
   final children = <StyledNode>[];
   for (final child in node.children) {
     if (child is Element && child.tagName == 'head') continue; // Skip head.
+    if (child is Element && child.tagName == 'style') continue; // Skip style (CSS-only).
     if (child is Comment) continue;
     final styledChild = _styleNode(child, stylesheets, _inheritableProps(props));
     children.add(styledChild);
@@ -653,14 +662,26 @@ void _applyDefaults(Element element, Map<String, String> props) {
 
     // ── Tables ──
     case 'table':
-      props['display'] = 'block';
+      props['display'] = 'table';
       props['border-collapse'] = 'separate';
-    case 'td':
-      props['padding'] = '1px';
-    case 'th':
-      props['padding'] = '1px';
-      props['font-weight'] = 'bold';
-      props['text-align'] = 'center';
+    case 'td' || 'th':
+      // Apply cellpadding from ancestor <table> if present.
+      Node? tableAncestor = element.parent;
+      while (tableAncestor != null) {
+        if (tableAncestor is Element && tableAncestor.tagName == 'table') {
+          final cp = tableAncestor.attributes['cellpadding'];
+          if (cp != null && cp.isNotEmpty) {
+            props.putIfAbsent('padding', () => '${cp}px');
+          }
+          break;
+        }
+        tableAncestor = tableAncestor.parent;
+      }
+      props.putIfAbsent('padding', () => '1px');
+      if (element.tagName == 'th') {
+        props['font-weight'] = 'bold';
+        props['text-align'] = 'center';
+      }
     case 'caption':
       props['text-align'] = 'center';
 
@@ -700,6 +721,21 @@ void _applyHtmlAttributes(Element element, Map<String, String> props) {
   final h = element.attributes['height'];
   if (h != null && h.isNotEmpty && !props.containsKey('height')) {
     props['height'] = _cssifyDimension(h);
+  }
+  // bgcolor attribute → background-color.
+  final bg = element.attributes['bgcolor'];
+  if (bg != null && bg.isNotEmpty && !props.containsKey('background-color')) {
+    props['background-color'] = bg;
+  }
+  // align attribute → text-align.
+  final align = element.attributes['align'];
+  if (align != null && align.isNotEmpty && !props.containsKey('text-align')) {
+    props['text-align'] = align.toLowerCase();
+  }
+  // valign attribute → vertical-align.
+  final valign = element.attributes['valign'];
+  if (valign != null && valign.isNotEmpty && !props.containsKey('vertical-align')) {
+    props['vertical-align'] = valign.toLowerCase();
   }
 }
 

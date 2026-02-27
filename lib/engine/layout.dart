@@ -63,7 +63,7 @@ class Rect {
       );
 }
 
-enum LayoutType { block, inline, anonymous, text, flex, grid }
+enum LayoutType { block, inline, anonymous, text, flex, grid, table }
 
 /// A node in the layout tree. Each box has a content rect plus
 /// margin, border, and padding edges.
@@ -303,6 +303,20 @@ LayoutBox _buildLayoutTree(StyledNode styled, String? parentHref) {
     return box;
   }
 
+  // Table layout.
+  if (display == Display.table || display == Display.inlineTable) {
+    final box = LayoutBox(LayoutType.table, styled);
+    box.linkHref = href;
+    _applyVisualProperties(box, styled);
+
+    for (final child in styled.children) {
+      if (child.display == Display.none) continue;
+      final childBox = _buildLayoutTree(child, href);
+      box.children.add(childBox);
+    }
+    return box;
+  }
+
   final type = (display == Display.inline || display == Display.inlineBlock)
       ? LayoutType.inline
       : LayoutType.block;
@@ -412,7 +426,9 @@ void _layoutBlock(LayoutBox box, double containerWidth, TextMeasurer measurer) {
   final contentWidth = box.content.width;
 
   // Lay out children.
-  if (box.layoutType == LayoutType.grid) {
+  if (box.layoutType == LayoutType.table) {
+    _layoutTable(box, contentWidth, measurer);
+  } else if (box.layoutType == LayoutType.grid) {
     _layoutGrid(box, contentWidth, measurer);
   } else if (box.layoutType == LayoutType.flex) {
     _layoutFlex(box, contentWidth, measurer);
@@ -729,6 +745,8 @@ void _layoutFloatedChild(
   // Layout child content.
   if (child.layoutType == LayoutType.flex) {
     _layoutFlex(child, child.content.width, measurer);
+  } else if (child.layoutType == LayoutType.table) {
+    _layoutTable(child, child.content.width, measurer);
   } else if (_hasInlineChildren(child)) {
     _layoutInlineChildren(child, child.content.width, measurer);
   } else {
@@ -796,6 +814,8 @@ void _layoutAbsoluteChild(
   // Layout child content.
   if (child.layoutType == LayoutType.flex) {
     _layoutFlex(child, child.content.width, measurer);
+  } else if (child.layoutType == LayoutType.table) {
+    _layoutTable(child, child.content.width, measurer);
   } else if (_hasInlineChildren(child)) {
     _layoutInlineChildren(child, child.content.width, measurer);
   } else {
@@ -821,7 +841,8 @@ void _ensureBlockChildren(LayoutBox box) {
 
   final hasBlock = box.children.any((c) =>
       c.layoutType == LayoutType.block || c.layoutType == LayoutType.anonymous ||
-      c.layoutType == LayoutType.flex || c.layoutType == LayoutType.grid);
+      c.layoutType == LayoutType.flex || c.layoutType == LayoutType.grid ||
+      c.layoutType == LayoutType.table);
   final hasInline = box.children.any((c) =>
       c.layoutType == LayoutType.inline || c.layoutType == LayoutType.text);
 
@@ -833,7 +854,9 @@ void _ensureBlockChildren(LayoutBox box) {
   for (final child in box.children) {
     if (child.layoutType == LayoutType.block ||
         child.layoutType == LayoutType.anonymous ||
-        child.layoutType == LayoutType.flex) {
+        child.layoutType == LayoutType.flex ||
+        child.layoutType == LayoutType.grid ||
+        child.layoutType == LayoutType.table) {
       if (inlineRun != null) {
         final anon = LayoutBox(LayoutType.anonymous);
         anon.children.addAll(inlineRun);
@@ -951,6 +974,8 @@ void _layoutFlexRow(
     child.content.y = 0;
     if (child.layoutType == LayoutType.flex) {
       _layoutFlex(child, child.content.width, measurer);
+    } else if (child.layoutType == LayoutType.table) {
+      _layoutTable(child, child.content.width, measurer);
     } else if (_hasInlineChildren(child)) {
       _layoutInlineContent(child, child.content.width, measurer);
     } else {
@@ -1077,6 +1102,8 @@ void _layoutFlexColumn(
     child.content.y = 0;
     if (child.layoutType == LayoutType.flex) {
       _layoutFlex(child, child.content.width, measurer);
+    } else if (child.layoutType == LayoutType.table) {
+      _layoutTable(child, child.content.width, measurer);
     } else if (_hasInlineChildren(child)) {
       _layoutInlineContent(child, child.content.width, measurer);
     } else {
@@ -1249,6 +1276,8 @@ void _layoutGrid(LayoutBox box, double containerWidth, TextMeasurer measurer) {
       _layoutFlex(child, child.content.width, measurer);
     } else if (child.layoutType == LayoutType.grid) {
       _layoutGrid(child, child.content.width, measurer);
+    } else if (child.layoutType == LayoutType.table) {
+      _layoutTable(child, child.content.width, measurer);
     } else if (_hasInlineChildren(child)) {
       _layoutInlineContent(child, child.content.width, measurer);
     } else {
@@ -1312,6 +1341,8 @@ void _layoutGrid(LayoutBox box, double containerWidth, TextMeasurer measurer) {
       _layoutFlex(child, child.content.width, measurer);
     } else if (child.layoutType == LayoutType.grid) {
       _layoutGrid(child, child.content.width, measurer);
+    } else if (child.layoutType == LayoutType.table) {
+      _layoutTable(child, child.content.width, measurer);
     } else if (_hasInlineChildren(child)) {
       _layoutInlineContent(child, child.content.width, measurer);
     } else {
@@ -1627,23 +1658,267 @@ class _TextRun {
 }
 
 
-// ── Table row layout ────────────────────────────────────────────────
+// ── Table layout ────────────────────────────────────────────────────
 
 bool _isTableRow(LayoutBox box) {
   if (box.styledNode?.node is! Element) return false;
   return (box.styledNode!.node as Element).tagName == 'tr';
 }
 
+bool _isRowGroup(LayoutBox box) {
+  if (box.styledNode?.node is! Element) return false;
+  final tag = (box.styledNode!.node as Element).tagName;
+  return tag == 'tbody' || tag == 'thead' || tag == 'tfoot';
+}
+
+bool _isTableCell(LayoutBox box) {
+  if (box.styledNode?.node is! Element) return false;
+  final tag = (box.styledNode!.node as Element).tagName;
+  return tag == 'td' || tag == 'th';
+}
+
+/// Get table cell children of a row, filtering out whitespace-only text nodes.
+List<LayoutBox> _getTableCells(LayoutBox row) {
+  return row.children.where((c) {
+    if (_isTableCell(c)) return true;
+    // Include non-cell block children that are actual content.
+    if (c.layoutType == LayoutType.block && c.styledNode?.node is Element) return true;
+    return false;
+  }).toList();
+}
+
+/// Collect all <tr> rows from a table, walking through tbody/thead/tfoot.
+List<LayoutBox> _collectTableRows(LayoutBox table) {
+  final rows = <LayoutBox>[];
+  for (final child in table.children) {
+    if (_isTableRow(child)) {
+      rows.add(child);
+    } else if (_isRowGroup(child)) {
+      for (final gc in child.children) {
+        if (_isTableRow(gc)) rows.add(gc);
+      }
+    }
+  }
+  return rows;
+}
+
+/// Full table layout: determines consistent column widths across all rows
+/// and positions cells in a grid pattern.
+void _layoutTable(LayoutBox box, double containerWidth, TextMeasurer measurer) {
+  final rows = _collectTableRows(box);
+
+  if (rows.isEmpty) {
+    // No recognizable table structure — fall back to block layout.
+    if (_hasInlineChildren(box)) {
+      _layoutInlineChildren(box, containerWidth, measurer);
+    } else {
+      _layoutBlockChildren(box, containerWidth, measurer);
+    }
+    return;
+  }
+
+  // Read cellspacing from the <table> element.
+  double cellSpacing = 2.0; // Default cellspacing.
+  if (box.styledNode?.node is Element) {
+    final el = box.styledNode!.node as Element;
+    final cs = el.attributes['cellspacing'];
+    if (cs != null && cs.isNotEmpty) {
+      cellSpacing = double.tryParse(cs) ?? 2.0;
+    }
+    // CSS border-spacing overrides the attribute.
+    final bsStr = box.styledNode!.prop('border-spacing', '');
+    if (bsStr.isNotEmpty) {
+      cellSpacing = _parsePx(bsStr);
+    }
+  }
+
+  // Determine column count (max cells in any row).
+  int colCount = 0;
+  for (final row in rows) {
+    final cells = _getTableCells(row);
+    int cols = 0;
+    for (final cell in cells) {
+      final colspan = _getColspan(cell);
+      cols += colspan;
+    }
+    colCount = math.max(colCount, cols);
+  }
+  if (colCount == 0) return;
+
+  // Available width for cells after spacing.
+  final totalSpacing = cellSpacing * (colCount + 1);
+  final availableForCells = math.max(0.0, containerWidth - totalSpacing);
+
+  // Calculate column widths — collect explicit widths from cells.
+  final colWidths = List<double>.filled(colCount, -1.0);
+  for (final row in rows) {
+    final cells = _getTableCells(row);
+    int colIdx = 0;
+    for (final cell in cells) {
+      if (colIdx >= colCount) break;
+      final colspan = _getColspan(cell);
+      if (colspan == 1 && colWidths[colIdx] < 0) {
+        final widthStr = cell.styledNode?.prop('width', '') ?? '';
+        if (widthStr.isNotEmpty && widthStr != 'auto') {
+          final w = _parsePx(widthStr, availableForCells);
+          if (w > 0) colWidths[colIdx] = w;
+        }
+      }
+      colIdx += colspan;
+    }
+  }
+
+  // Distribute remaining width among auto columns.
+  double totalFixed = 0;
+  int autoCount = 0;
+  for (int i = 0; i < colCount; i++) {
+    if (colWidths[i] >= 0) {
+      totalFixed += colWidths[i];
+    } else {
+      autoCount++;
+    }
+  }
+  final remaining = math.max(0.0, availableForCells - totalFixed);
+  final autoWidth = autoCount > 0 ? remaining / autoCount : 0.0;
+  for (int i = 0; i < colCount; i++) {
+    if (colWidths[i] < 0) colWidths[i] = autoWidth;
+  }
+
+  // Layout each row using the computed column widths.
+  double cursorY = box.content.y + cellSpacing;
+
+  for (final child in box.children) {
+    if (_isTableRow(child)) {
+      cursorY = _layoutTableRowWithCols(
+          child, box, colWidths, cursorY, cellSpacing, measurer);
+    } else if (_isRowGroup(child)) {
+      // Row groups are transparent — process their row children.
+      _computeBoxDimensions(child, containerWidth);
+      child.content.x = box.content.x;
+      child.content.y = cursorY;
+      child.content.width = containerWidth;
+      final groupStartY = cursorY;
+      for (final gc in child.children) {
+        if (_isTableRow(gc)) {
+          cursorY = _layoutTableRowWithCols(
+              gc, box, colWidths, cursorY, cellSpacing, measurer);
+        }
+      }
+      child.content.height = cursorY - groupStartY;
+    }
+  }
+
+  box.content.height = cursorY - box.content.y;
+}
+
+/// Get the colspan value from a table cell.
+int _getColspan(LayoutBox cell) {
+  if (cell.styledNode?.node is! Element) return 1;
+  final el = cell.styledNode!.node as Element;
+  final cs = el.attributes['colspan'];
+  if (cs == null || cs.isEmpty) return 1;
+  return int.tryParse(cs) ?? 1;
+}
+
+/// Layout a single table row using pre-computed column widths.
+/// Returns the Y position after this row.
+double _layoutTableRowWithCols(
+  LayoutBox row,
+  LayoutBox table,
+  List<double> colWidths,
+  double startY,
+  double cellSpacing,
+  TextMeasurer measurer,
+) {
+  _computeBoxDimensions(row, table.content.width);
+  row.content.x = table.content.x;
+  row.content.y = startY;
+  row.content.width = table.content.width;
+
+  final cells = _getTableCells(row);
+  double cursorX = table.content.x + cellSpacing;
+  double maxCellHeight = 0;
+
+  int colIdx = 0;
+  for (int i = 0; i < cells.length; i++) {
+    if (colIdx >= colWidths.length) break;
+    final cell = cells[i];
+    final colspan = _getColspan(cell);
+
+    // Calculate total width for this cell (sum of spanned columns + spacing).
+    double cellWidth = 0;
+    for (int c = 0; c < colspan && colIdx + c < colWidths.length; c++) {
+      cellWidth += colWidths[colIdx + c];
+      if (c > 0) cellWidth += cellSpacing;
+    }
+
+    _computeBoxDimensions(cell, cellWidth);
+    cell.content.width = math.max(0, cellWidth -
+        cell.margin.left - cell.margin.right -
+        cell.border.left - cell.border.right -
+        cell.padding.left - cell.padding.right);
+    cell.content.x = cursorX +
+        cell.margin.left + cell.border.left + cell.padding.left;
+    cell.content.y = startY +
+        cell.margin.top + cell.border.top + cell.padding.top;
+
+    // Layout cell content.
+    if (cell.layoutType == LayoutType.flex) {
+      _layoutFlex(cell, cell.content.width, measurer);
+    } else if (cell.layoutType == LayoutType.table) {
+      _layoutTable(cell, cell.content.width, measurer);
+    } else if (_hasInlineChildren(cell)) {
+      _layoutInlineChildren(cell, cell.content.width, measurer);
+    } else {
+      _layoutBlockChildren(cell, cell.content.width, measurer);
+    }
+
+    // Auto-height for the cell.
+    final heightProp = cell.styledNode?.prop('height', '') ?? '';
+    if (heightProp.isEmpty || heightProp == 'auto') {
+      double h = 0;
+      for (final ch in cell.children) {
+        h = math.max(h, ch.marginBox.y + ch.marginBox.height - cell.content.y);
+      }
+      cell.content.height = h;
+    }
+    _applyHeightConstraints(cell);
+
+    final cellTotalHeight = cell.content.height +
+        cell.margin.top + cell.margin.bottom +
+        cell.border.top + cell.border.bottom +
+        cell.padding.top + cell.padding.bottom;
+    maxCellHeight = math.max(maxCellHeight, cellTotalHeight);
+
+    // Advance horizontal cursor past this cell's columns.
+    for (int c = 0; c < colspan && colIdx + c < colWidths.length; c++) {
+      cursorX += colWidths[colIdx + c] + cellSpacing;
+    }
+    colIdx += colspan;
+  }
+
+  row.content.height = maxCellHeight;
+  return startY + maxCellHeight + cellSpacing;
+}
+
+/// Legacy standalone row layout (used when <tr> appears outside <table>).
 void _layoutTableRow(LayoutBox box, double containerWidth, TextMeasurer measurer) {
   if (box.children.isEmpty) return;
 
-  final cellCount = box.children.length;
+  final cells = _getTableCells(box);
+  if (cells.isEmpty) {
+    // No cells — fall back to block layout.
+    _layoutBlockChildren(box, containerWidth, measurer);
+    return;
+  }
+
+  final cellCount = cells.length;
   final cellWidths = List<double>.filled(cellCount, -1.0);
   double totalFixed = 0;
   int autoCount = 0;
 
   for (int i = 0; i < cellCount; i++) {
-    final cell = box.children[i];
+    final cell = cells[i];
     final widthStr = cell.styledNode?.prop('width', '') ?? '';
     if (widthStr.isNotEmpty && widthStr != 'auto') {
       final w = _parsePx(widthStr, containerWidth);
@@ -1665,7 +1940,7 @@ void _layoutTableRow(LayoutBox box, double containerWidth, TextMeasurer measurer
   double cursorX = box.content.x;
 
   for (int i = 0; i < cellCount; i++) {
-    final cell = box.children[i];
+    final cell = cells[i];
     final allocatedWidth = cellWidths[i];
 
     _computeBoxDimensions(cell, allocatedWidth);
@@ -1678,7 +1953,9 @@ void _layoutTableRow(LayoutBox box, double containerWidth, TextMeasurer measurer
     cell.content.y = box.content.y +
         cell.margin.top + cell.border.top + cell.padding.top;
 
-    if (_hasInlineChildren(cell)) {
+    if (cell.layoutType == LayoutType.table) {
+      _layoutTable(cell, cell.content.width, measurer);
+    } else if (_hasInlineChildren(cell)) {
       _layoutInlineChildren(cell, cell.content.width, measurer);
     } else {
       _layoutBlockChildren(cell, cell.content.width, measurer);
