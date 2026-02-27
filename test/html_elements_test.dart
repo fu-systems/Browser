@@ -531,7 +531,7 @@ void main() {
       final font = styled.children.firstWhere(
         (c) => c.node is Element && (c.node as Element).tagName == 'font'
       );
-      expect(font.prop('font-family'), 'Arial');
+      expect(font.prop('font-family'), 'Arial,Helvetica');
     });
 
     test('font size attribute maps to font-size', () {

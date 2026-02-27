@@ -247,7 +247,8 @@ class _BrowserShellState extends State<BrowserShell> {
 
       // 8. Layout.
       final viewportWidth = _viewportWidth;
-      var layoutRoot = engine.layoutTree(styledTree, viewportWidth, _textMeasurer);
+      final viewportHeight = MediaQuery.of(context).size.height - 120;
+      var layoutRoot = engine.layoutTree(styledTree, viewportWidth, _textMeasurer, viewportHeight);
 
       // 9. Run onLayoutComplete hooks.
       if (pipeline != null) {
@@ -527,7 +528,8 @@ class _BrowserShellState extends State<BrowserShell> {
         styledTree = pipeline.runStylesComputed(styledTree, tab.stylesheets);
       }
       final viewportWidth = _viewportWidth;
-      var layoutRoot = engine.layoutTree(styledTree, viewportWidth, _textMeasurer);
+      final viewportHeight = MediaQuery.of(context).size.height - 120;
+      var layoutRoot = engine.layoutTree(styledTree, viewportWidth, _textMeasurer, viewportHeight);
       if (pipeline != null) {
         layoutRoot = pipeline.runLayoutComplete(layoutRoot);
       }

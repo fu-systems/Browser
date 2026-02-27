@@ -219,7 +219,25 @@ Map<String, String> _resolveElement(
   // Handle CSS-wide keywords: inherit, initial, unset.
   _resolveKeywords(props, inherited, parentAllProps);
 
+  // Resolve all var() references eagerly so downstream code (layout, paint)
+  // always sees final values, not raw var() expressions.
+  _resolveAllVars(props);
+
   return props;
+}
+
+/// Resolve every var() reference in the property map in-place.
+void _resolveAllVars(Map<String, String> props) {
+  final keys = props.keys.toList();
+  for (final key in keys) {
+    final val = props[key];
+    if (val != null && val.contains('var(')) {
+      final resolved = StyledNode._resolveVar(val, props);
+      if (resolved != null && resolved.isNotEmpty) {
+        props[key] = resolved;
+      }
+    }
+  }
 }
 
 /// Handle inherit/initial/unset keywords.

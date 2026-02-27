@@ -154,7 +154,12 @@ class PagePainter extends CustomPainter {
   }
 
   void _paintBackground(Canvas canvas, engine.LayoutBox box) {
-    final bgStr = box.styledNode?['background-color'] ?? box.styledNode?['background'] ?? '';
+    // Use prop() to resolve var() references, fallback to operator[] for raw access.
+    final s = box.styledNode;
+    String bgStr = s?.prop('background-color', '') ?? '';
+    if (bgStr.isEmpty) {
+      bgStr = s?.prop('background', '') ?? '';
+    }
     if (bgStr.isEmpty) return;
 
     final rect = box.paddingBox;
@@ -174,7 +179,18 @@ class PagePainter extends CustomPainter {
       }
     }
 
-    final bgColor = _resolveColor(bgStr);
+    // For complex background shorthands like "url(...) #color", extract color.
+    Color? bgColor = _resolveColor(bgStr);
+    if (bgColor == null && bgStr.contains('#')) {
+      // Try to extract a hex color from the background shorthand.
+      final hexMatch = RegExp(r'(#[0-9a-fA-F]{3,8})').firstMatch(bgStr);
+      if (hexMatch != null) bgColor = _resolveColor(hexMatch.group(1)!);
+    }
+    if (bgColor == null && (bgStr.contains('rgb') || bgStr.contains('hsl'))) {
+      // Try to extract rgb()/hsl() from background shorthand.
+      final funcMatch = RegExp(r'((?:rgb|hsl)a?\([^)]+\))').firstMatch(bgStr);
+      if (funcMatch != null) bgColor = _resolveColor(funcMatch.group(1)!);
+    }
     if (bgColor == null) return;
 
     final paint = Paint()..color = bgColor;
@@ -442,13 +458,13 @@ class PagePainter extends CustomPainter {
     final styled = box.styledNode;
     final text = box.text!;
 
-    final fontSize = _parsePx(styled?['font-size'] ?? '16px');
-    final fontFamily = styled?['font-family'] ?? 'serif';
-    final fontWeight = (styled?['font-weight'] ?? 'normal').toLowerCase();
-    final fontStyle = (styled?['font-style'] ?? 'normal').toLowerCase();
-    final color = _resolveColor(styled?['color'] ?? '#000000') ?? Colors.black;
-    final decoration = styled?['text-decoration'] ?? '';
-    final textShadow = styled?['text-shadow'] ?? '';
+    final fontSize = _parsePx(styled?.prop('font-size', '16px') ?? '16px');
+    final fontFamily = styled?.prop('font-family', 'serif') ?? 'serif';
+    final fontWeight = (styled?.prop('font-weight', 'normal') ?? 'normal').toLowerCase();
+    final fontStyle = (styled?.prop('font-style', 'normal') ?? 'normal').toLowerCase();
+    final color = _resolveColor(styled?.prop('color', '#000000') ?? '#000000') ?? Colors.black;
+    final decoration = styled?.prop('text-decoration', '') ?? '';
+    final textShadow = styled?.prop('text-shadow', '') ?? '';
 
     TextDecoration textDecoration = TextDecoration.none;
     if (decoration.contains('underline')) {
@@ -529,11 +545,16 @@ class PagePainter extends CustomPainter {
 
   Color _resolveBorderColor(StyledNode? styled) {
     if (styled == null) return Colors.black;
-    final bc = styled['border-color'];
-    if (bc != null) return _resolveColor(bc) ?? Colors.black;
-    final border = styled['border'] ?? styled['border-top'] ?? '';
+    final bc = styled.prop('border-color', '');
+    if (bc.isNotEmpty) return _resolveColor(bc) ?? Colors.black;
+    final border = styled.prop('border', '');
     if (border.isNotEmpty) {
       final parts = border.split(RegExp(r'\s+'));
+      if (parts.length >= 3) return _resolveColor(parts[2]) ?? Colors.black;
+    }
+    final borderTop = styled.prop('border-top', '');
+    if (borderTop.isNotEmpty) {
+      final parts = borderTop.split(RegExp(r'\s+'));
       if (parts.length >= 3) return _resolveColor(parts[2]) ?? Colors.black;
     }
     return Colors.black;
@@ -541,10 +562,10 @@ class PagePainter extends CustomPainter {
 
   Color? _resolveBorderSideColor(StyledNode? styled, String side) {
     if (styled == null) return null;
-    final sideColor = styled['$side-color'];
-    if (sideColor != null) return _resolveColor(sideColor);
-    final sideVal = styled[side];
-    if (sideVal != null && sideVal.isNotEmpty) {
+    final sideColor = styled.prop('$side-color', '');
+    if (sideColor.isNotEmpty) return _resolveColor(sideColor);
+    final sideVal = styled.prop(side, '');
+    if (sideVal.isNotEmpty) {
       final parts = sideVal.split(RegExp(r'\s+'));
       if (parts.length >= 3) return _resolveColor(parts[2]);
     }

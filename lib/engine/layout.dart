@@ -148,16 +148,17 @@ class LayoutBox {
 LayoutBox layoutTree(
   StyledNode root,
   double viewportWidth,
-  TextMeasurer measurer,
-) {
+  TextMeasurer measurer, [
+  double viewportHeight = 768,
+]) {
   final rootBox = _buildLayoutTree(root, null);
   rootBox.content.width = viewportWidth;
   // Compute root dimensions to get margin/border/padding, then position
   // the content area inside them (no parent does this for the root box).
-  _computeBoxDimensions(rootBox, viewportWidth);
+  _computeBoxDimensions(rootBox, viewportWidth, viewportHeight);
   rootBox.content.x = rootBox.margin.left + rootBox.border.left + rootBox.padding.left;
   rootBox.content.y = rootBox.margin.top + rootBox.border.top + rootBox.padding.top;
-  _layoutBlock(rootBox, viewportWidth, measurer);
+  _layoutBlock(rootBox, viewportWidth, measurer, viewportHeight);
   return rootBox;
 }
 
@@ -215,8 +216,19 @@ LayoutBox _buildLayoutTree(StyledNode styled, String? parentHref) {
       final box = LayoutBox(LayoutType.inline, styled);
       box.linkHref = href;
       box.imageUrl = el.attributes['src'] ?? el.attributes['data'] ?? '';
-      final w = double.tryParse(el.attributes['width'] ?? '') ?? 0;
-      final h = double.tryParse(el.attributes['height'] ?? '') ?? 0;
+      double w = double.tryParse(el.attributes['width'] ?? '') ?? 0;
+      double h = double.tryParse(el.attributes['height'] ?? '') ?? 0;
+      // For SVG, also try viewBox for dimensions.
+      if (tag == 'svg' && (w <= 0 || h <= 0)) {
+        final viewBox = el.attributes['viewBox'] ?? el.attributes['viewbox'] ?? '';
+        if (viewBox.isNotEmpty) {
+          final parts = viewBox.split(RegExp(r'[\s,]+'));
+          if (parts.length >= 4) {
+            if (w <= 0) w = double.tryParse(parts[2]) ?? 0;
+            if (h <= 0) h = double.tryParse(parts[3]) ?? 0;
+          }
+        }
+      }
       box.imageWidth = w > 0 ? w : _defaultMediaWidth(tag);
       box.imageHeight = h > 0 ? h : _defaultMediaHeight(tag);
       _applyVisualProperties(box, styled);
@@ -419,25 +431,27 @@ void _applyBorderRadius(LayoutBox box, StyledNode styled) {
 
 // ── Block layout ────────────────────────────────────────────────────
 
-void _layoutBlock(LayoutBox box, double containerWidth, TextMeasurer measurer) {
-  _computeBoxDimensions(box, containerWidth);
+void _layoutBlock(LayoutBox box, double containerWidth, TextMeasurer measurer, [double containerHeight = 0]) {
+  _computeBoxDimensions(box, containerWidth, containerHeight);
 
   // Content width = container minus our horizontal margin/border/padding.
   final contentWidth = box.content.width;
+  // The resolved height of this box (if explicit), used for children's % heights.
+  final resolvedHeight = box.content.height;
 
   // Lay out children.
   if (box.layoutType == LayoutType.table) {
     _layoutTable(box, contentWidth, measurer);
   } else if (box.layoutType == LayoutType.grid) {
-    _layoutGrid(box, contentWidth, measurer);
+    _layoutGrid(box, contentWidth, measurer, resolvedHeight);
   } else if (box.layoutType == LayoutType.flex) {
-    _layoutFlex(box, contentWidth, measurer);
+    _layoutFlex(box, contentWidth, measurer, resolvedHeight);
   } else if (_isTableRow(box)) {
     _layoutTableRow(box, contentWidth, measurer);
   } else if (_hasInlineChildren(box)) {
     _layoutInlineChildren(box, contentWidth, measurer);
   } else {
-    _layoutBlockChildren(box, contentWidth, measurer);
+    _layoutBlockChildren(box, contentWidth, measurer, null, resolvedHeight);
   }
 
   // If height was not set explicitly, use content height.
@@ -465,13 +479,13 @@ void _layoutBlock(LayoutBox box, double containerWidth, TextMeasurer measurer) {
   }
 
   // Apply min/max height constraints.
-  _applyHeightConstraints(box);
+  _applyHeightConstraints(box, containerHeight);
 
   // Apply positioning offsets for relative/absolute.
   _applyPositioning(box);
 }
 
-void _computeBoxDimensions(LayoutBox box, double containerWidth) {
+void _computeBoxDimensions(LayoutBox box, double containerWidth, [double containerHeight = 0]) {
   final s = box.styledNode;
   if (s == null) {
     // Anonymous box: no margins/borders/padding, fills container width.
@@ -543,7 +557,7 @@ void _computeBoxDimensions(LayoutBox box, double containerWidth) {
   // Height: explicit or auto (computed later).
   final heightStr = s.prop('height', '');
   if (heightStr.isNotEmpty && heightStr != 'auto') {
-    double h = _parsePx(heightStr, 0);
+    double h = _parsePx(heightStr, containerHeight);
     if (boxSizing == 'border-box') {
       h -= box.padding.top + box.padding.bottom + box.border.top + box.border.bottom;
     }
@@ -552,18 +566,18 @@ void _computeBoxDimensions(LayoutBox box, double containerWidth) {
 }
 
 /// Apply min/max height constraints after layout.
-void _applyHeightConstraints(LayoutBox box) {
+void _applyHeightConstraints(LayoutBox box, [double containerHeight = 0]) {
   final s = box.styledNode;
   if (s == null) return;
 
   final minH = s.prop('min-height', '');
   if (minH.isNotEmpty && minH != 'auto') {
-    final mh = _parsePx(minH, 0);
+    final mh = _parsePx(minH, containerHeight);
     box.content.height = math.max(box.content.height, mh);
   }
   final maxH = s.prop('max-height', '');
   if (maxH.isNotEmpty && maxH != 'none') {
-    final mh = _parsePx(maxH, 0);
+    final mh = _parsePx(maxH, containerHeight);
     box.content.height = math.min(box.content.height, mh);
   }
 }
@@ -658,6 +672,7 @@ void _layoutBlockChildren(
   double containerWidth,
   TextMeasurer measurer, [
   _FloatContext? parentFloats,
+  double containerHeight = 0,
 ]) {
   _ensureBlockChildren(box);
 
@@ -673,7 +688,7 @@ void _layoutBlockChildren(
         continue;
       }
 
-      _computeBoxDimensions(child, containerWidth);
+      _computeBoxDimensions(child, containerWidth, containerHeight);
 
       // Handle clear property.
       if (child.clear != 'none') {
@@ -735,18 +750,19 @@ void _layoutBlockChildren(
         // Dispatch child layout without re-calling _computeBoxDimensions.
         // _computeBoxDimensions was already called above for this child.
         final childContentWidth = child.content.width;
+        final childResolvedH = child.content.height;
         if (child.layoutType == LayoutType.table) {
           _layoutTable(child, childContentWidth, measurer);
         } else if (child.layoutType == LayoutType.grid) {
-          _layoutGrid(child, childContentWidth, measurer);
+          _layoutGrid(child, childContentWidth, measurer, childResolvedH);
         } else if (child.layoutType == LayoutType.flex) {
-          _layoutFlex(child, childContentWidth, measurer);
+          _layoutFlex(child, childContentWidth, measurer, childResolvedH);
         } else if (_isTableRow(child)) {
           _layoutTableRow(child, childContentWidth, measurer);
         } else if (_hasInlineChildren(child)) {
           _layoutInlineChildren(child, childContentWidth, measurer);
         } else {
-          _layoutBlockChildren(child, childContentWidth, measurer);
+          _layoutBlockChildren(child, childContentWidth, measurer, null, childResolvedH);
         }
         // Auto-height for block children.
         final hProp = child.styledNode?.prop('height', '') ?? '';
@@ -762,7 +778,7 @@ void _layoutBlockChildren(
             child.content.height = h;
           }
         }
-        _applyHeightConstraints(child);
+        _applyHeightConstraints(child, containerHeight);
       }
 
       cursorY = child.content.y + child.content.height +
@@ -952,7 +968,7 @@ void _ensureBlockChildren(LayoutBox box) {
 
 // ── Flexbox layout ──────────────────────────────────────────────────
 
-void _layoutFlex(LayoutBox box, double containerWidth, TextMeasurer measurer) {
+void _layoutFlex(LayoutBox box, double containerWidth, TextMeasurer measurer, [double containerHeight = 0]) {
   final s = box.styledNode;
   final direction = s?.prop('flex-direction', 'row') ?? 'row';
   final justifyContent = s?.prop('justify-content', 'flex-start') ?? 'flex-start';
@@ -962,6 +978,10 @@ void _layoutFlex(LayoutBox box, double containerWidth, TextMeasurer measurer) {
 
   final isRow = direction == 'row' || direction == 'row-reverse';
   final isReverse = direction == 'row-reverse' || direction == 'column-reverse';
+
+  // The resolved height of THIS flex container — used for children's % heights
+  // and for flex-grow distribution in column direction.
+  final resolvedHeight = box.content.height > 0 ? box.content.height : containerHeight;
 
   // Per CSS Flexbox §4: whitespace-only text runs directly inside a flex
   // container are not rendered — remove them from the child list.
@@ -976,7 +996,7 @@ void _layoutFlex(LayoutBox box, double containerWidth, TextMeasurer measurer) {
       _layoutAbsoluteChild(child, box, containerWidth, measurer);
       continue;
     }
-    _computeBoxDimensions(child, isRow ? containerWidth : box.content.width);
+    _computeBoxDimensions(child, isRow ? containerWidth : box.content.width, resolvedHeight);
     flexChildren.add(child);
   }
 
@@ -984,10 +1004,10 @@ void _layoutFlex(LayoutBox box, double containerWidth, TextMeasurer measurer) {
 
   if (isRow) {
     _layoutFlexRow(box, flexChildren, containerWidth, justifyContent, alignItems,
-        flexWrap, gap, isReverse, measurer);
+        flexWrap, gap, isReverse, measurer, resolvedHeight);
   } else {
     _layoutFlexColumn(box, flexChildren, containerWidth, justifyContent, alignItems,
-        flexWrap, gap, isReverse, measurer);
+        flexWrap, gap, isReverse, measurer, resolvedHeight);
   }
 }
 
@@ -1000,8 +1020,9 @@ void _layoutFlexRow(
   String flexWrap,
   double gap,
   bool isReverse,
-  TextMeasurer measurer,
-) {
+  TextMeasurer measurer, [
+  double containerHeight = 0,
+]) {
   // Measure each child's natural width.
   final childWidths = <double>[];
   final childFlexGrow = <double>[];
@@ -1158,8 +1179,9 @@ void _layoutFlexColumn(
   String flexWrap,
   double gap,
   bool isReverse,
-  TextMeasurer measurer,
-) {
+  TextMeasurer measurer, [
+  double containerHeight = 0,
+]) {
   // Layout each child at full width first to get heights.
   final childHeights = <double>[];
   final childFlexGrow = <double>[];
@@ -1201,15 +1223,36 @@ void _layoutFlexColumn(
     childHeights.add(totalH);
   }
 
-  // Calculate total height.
-  double totalHeight = 0;
-  for (final h in childHeights) totalHeight += h;
-  totalHeight += gap * (children.length - 1);
+  // Calculate total height of non-grow children.
+  double totalFixedHeight = 0;
+  double totalGrow = 0;
+  for (int i = 0; i < children.length; i++) {
+    totalFixedHeight += childHeights[i];
+    totalGrow += childFlexGrow[i];
+  }
+  totalFixedHeight += gap * (children.length - 1);
+
+  // Distribute remaining space to flex-grow items.
+  final availMainSpace = box.content.height;
+  if (totalGrow > 0 && availMainSpace > totalFixedHeight) {
+    final growSpace = availMainSpace - totalFixedHeight;
+    for (int i = 0; i < children.length; i++) {
+      if (childFlexGrow[i] > 0) {
+        final share = growSpace * (childFlexGrow[i] / totalGrow);
+        childHeights[i] += share;
+        children[i].content.height += share;
+      }
+    }
+    // Recalculate total after distribution.
+    totalFixedHeight = 0;
+    for (final h in childHeights) totalFixedHeight += h;
+    totalFixedHeight += gap * (children.length - 1);
+  }
 
   // Justify content.
   double startY = box.content.y;
   double extraSpacing = 0;
-  final freeSpace = box.content.height - totalHeight;
+  final freeSpace = box.content.height - totalFixedHeight;
 
   if (freeSpace > 0) {
     switch (justifyContent) {
@@ -1301,7 +1344,7 @@ void _offsetBoxTree(LayoutBox box, double dx, double dy) {
 
 // ── Grid layout ─────────────────────────────────────────────────────
 
-void _layoutGrid(LayoutBox box, double containerWidth, TextMeasurer measurer) {
+void _layoutGrid(LayoutBox box, double containerWidth, TextMeasurer measurer, [double containerHeight = 0]) {
   final s = box.styledNode;
   final gap = _parsePx(s?.prop('gap', '0') ?? '0');
   final rowGap = _parsePx(s?.prop('row-gap', '') ?? '', gap);
