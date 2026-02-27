@@ -9,6 +9,7 @@ import '../../engine/dom.dart';
 import '../../network/logger.dart';
 import '../plugin.dart';
 import 'script_engine.dart';
+import 'quickjs_runtime.dart';
 
 // ── Enums ───────────────────────────────────────────────────────
 
@@ -71,6 +72,32 @@ class ScriptManagerPlugin extends Plugin {
   // ── State set by browser shell before each load ──
   ScriptMode currentMode = ScriptMode.off;
   TransmitMode currentTransmitMode = TransmitMode.normal;
+
+  // ── QuickJS native engine (lazy-loaded) ──
+  QuickJSRuntime? _quickjs;
+  bool _quickjsFailed = false;
+
+  /// Whether the native QuickJS engine is available.
+  bool get hasNativeEngine => _quickjs != null && !_quickjs!.isDisposed;
+
+  QuickJSRuntime? _getRuntime() {
+    if (_quickjsFailed) return null;
+    if (_quickjs != null && !_quickjs!.isDisposed) return _quickjs;
+    try {
+      final rt = QuickJSRuntime();
+      if (rt.initialize()) {
+        _quickjs = rt;
+        PaneLogger.info('script_manager: QuickJS native engine loaded');
+        return rt;
+      }
+      _quickjsFailed = true;
+      return null;
+    } catch (e) {
+      _quickjsFailed = true;
+      PaneLogger.info('script_manager: QuickJS not available, using regex');
+      return null;
+    }
+  }
 
   // ── Results from the last onDomReady ──
   /// Scripts extracted from the page (populated by onDomReady).
@@ -150,36 +177,14 @@ class ScriptManagerPlugin extends Plugin {
   /// Execute all pending scripts (for [ScriptMode.runAll]).
   ScriptResult executeAll(Document document) {
     try {
-      final engine = ScriptEngine(
-        document: document,
-        blockTransmit: isTransmitBlocked,
-      );
-
-      final allLog = <String>[];
-      final allAlerts = <String>[];
-      final allSkipped = <String>[];
-      String? nav;
-      bool modified = false;
-
-      for (final script in pendingScripts) {
-        if (script.content.isNotEmpty) {
-          final result = engine.execute(script.content);
-          allLog.addAll(result.log);
-          allAlerts.addAll(result.alerts);
-          allSkipped.addAll(result.skipped);
-          nav ??= result.pendingNavigation;
-          if (result.domModified) modified = true;
-        }
+      // Try native QuickJS engine first
+      final rt = _getRuntime();
+      if (rt != null) {
+        return _executeWithQuickJS(rt, pendingScripts, document);
       }
 
-      lastLog = allLog;
-      return ScriptResult(
-        log: allLog,
-        alerts: allAlerts,
-        pendingNavigation: nav,
-        domModified: modified,
-        skipped: allSkipped,
-      );
+      // Fallback to regex-based engine
+      return _executeWithRegex(pendingScripts, document);
     } catch (e) {
       PaneLogger.warn('script_manager', 'executeAll error: $e');
       lastLog = ['Script execution error: $e'];
@@ -193,41 +198,82 @@ class ScriptManagerPlugin extends Plugin {
     if (approved.isEmpty) return const ScriptResult();
 
     try {
-      final engine = ScriptEngine(
-        document: document,
-        blockTransmit: isTransmitBlocked,
-      );
-
-      final allLog = <String>[];
-      final allAlerts = <String>[];
-      final allSkipped = <String>[];
-      String? nav;
-      bool modified = false;
-
-      for (final script in approved) {
-        if (script.content.isNotEmpty) {
-          final result = engine.execute(script.content);
-          allLog.addAll(result.log);
-          allAlerts.addAll(result.alerts);
-          allSkipped.addAll(result.skipped);
-          nav ??= result.pendingNavigation;
-          if (result.domModified) modified = true;
-        }
+      final rt = _getRuntime();
+      if (rt != null) {
+        return _executeWithQuickJS(rt, approved, document);
       }
-
-      lastLog = allLog;
-      return ScriptResult(
-        log: allLog,
-        alerts: allAlerts,
-        pendingNavigation: nav,
-        domModified: modified,
-        skipped: allSkipped,
-      );
+      return _executeWithRegex(approved, document);
     } catch (e) {
       PaneLogger.warn('script_manager', 'executeApproved error: $e');
       lastLog = ['Script execution error: $e'];
       return const ScriptResult();
     }
+  }
+
+  // ── Engine dispatch ────────────────────────────────────────
+
+  ScriptResult _executeWithQuickJS(
+      QuickJSRuntime rt, List<ScriptInfo> scripts, Document document) {
+    final allLog = <String>[];
+    final allAlerts = <String>[];
+    final allSkipped = <String>[];
+    String? nav;
+    bool modified = false;
+
+    for (final script in scripts) {
+      if (script.content.isNotEmpty) {
+        final result = rt.eval(script.content, document,
+            blockTransmit: isTransmitBlocked);
+        allLog.addAll(result.log);
+        allAlerts.addAll(result.alerts);
+        allSkipped.addAll(result.errors);
+        nav ??= result.pendingNavigation;
+        if (result.domModified) modified = true;
+      }
+    }
+
+    lastLog = allLog;
+    return ScriptResult(
+      log: allLog,
+      alerts: allAlerts,
+      pendingNavigation: nav,
+      domModified: modified,
+      skipped: allSkipped,
+    );
+  }
+
+  ScriptResult _executeWithRegex(
+      List<ScriptInfo> scripts, Document document) {
+    final engine = ScriptEngine(
+      document: document,
+      blockTransmit: isTransmitBlocked,
+    );
+
+    final allLog = <String>[];
+    final allAlerts = <String>[];
+    final allSkipped = <String>[];
+    String? nav;
+    bool modified = false;
+
+    for (final script in scripts) {
+      if (script.content.isNotEmpty) {
+        final result = engine.execute(script.content);
+        allLog.addAll(result.log);
+        allAlerts.addAll(result.alerts);
+        allSkipped.addAll(result.skipped);
+        nav ??= result.pendingNavigation;
+        if (result.domModified) modified = true;
+      }
+    }
+
+    lastLog = allLog;
+    return ScriptResult(
+      log: allLog,
+      alerts: allAlerts,
+      pendingNavigation: nav,
+      domModified: modified,
+      skipped: allSkipped,
+    );
   }
 
   // ── Internals ─────────────────────────────────────────────────

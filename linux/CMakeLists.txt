@@ -106,6 +106,23 @@ foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})
     COMPONENT Runtime)
 endforeach(bundled_library)
 
+# Build and install the QuickJS native library
+set(QUICKJS_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../native/quickjs")
+if(EXISTS "${QUICKJS_SOURCE_DIR}/quickjs.c")
+  add_custom_command(
+    OUTPUT "${CMAKE_BINARY_DIR}/libquickjs.so"
+    COMMAND ${CMAKE_C_COMPILER} -Wall -fPIC -O2 -shared -lm
+            -o "${CMAKE_BINARY_DIR}/libquickjs.so"
+            "${QUICKJS_SOURCE_DIR}/quickjs.c"
+    DEPENDS "${QUICKJS_SOURCE_DIR}/quickjs.c" "${QUICKJS_SOURCE_DIR}/quickjs.h"
+    COMMENT "Building QuickJS native library"
+  )
+  add_custom_target(quickjs_lib ALL DEPENDS "${CMAKE_BINARY_DIR}/libquickjs.so")
+  install(FILES "${CMAKE_BINARY_DIR}/libquickjs.so"
+    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+endif()
+
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/linux/")
 install(DIRECTORY "${NATIVE_ASSETS_DIR}"
