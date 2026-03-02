@@ -1,10 +1,10 @@
-# Pane — Phase 2 Roadmap: C++ Standards-First Rendering Engine
+# Pane — Phase 2 Roadmap: C Standards-First Rendering Engine
 
 ## Overview
 
 Phase 1 (archived) proved the concept: a minimal, secure browser shell in Dart/Flutter.
 
-Phase 2 is a ground-up rewrite of the rendering engine in C++, built directly from the HTML and CSS specifications. The goal is not to replicate existing engines — it is to build a cleaner one by understanding the full interaction space *before* writing layout code.
+Phase 2 is a ground-up rewrite of the rendering engine in C, built directly from the HTML and CSS specifications. The goal is not to replicate existing engines — it is to build a cleaner one by understanding the full interaction space *before* writing layout code.
 
 ---
 
@@ -94,9 +94,9 @@ Generate automated test cases from the pairwise interaction list and validate ag
 - [ ] Where they diverge → flag as an ambiguity requiring a principled decision
 - [ ] Output: reference test suite with expected results
 
-### Stage 5 — C++ Engine Implementation
+### Stage 5 — C Engine Implementation
 
-Build the rendering engine in C++ using the pairwise transition model.
+Build the rendering engine in C using the pairwise transition model.
 
 - [ ] HTML parser (standards-compliant tokenizer + tree builder)
 - [ ] CSS parser (property recognition, value parsing, cascade resolution)
@@ -110,7 +110,7 @@ Build the rendering engine in C++ using the pairwise transition model.
 Gather a large dataset of real page sources and run the engine against them to find what the pairwise model misses.
 
 - [ ] Collect page sources from top sites, diverse layouts, edge-case-heavy pages
-- [ ] Render with the C++ engine and compare against reference engine output
+- [ ] Render with the C engine and compare against reference engine output
 - [ ] Classify failures: pairwise gap, chain-sensitive gap, parser bug, spec ambiguity
 - [ ] Feed findings back into the pairwise interaction list and context object
 
@@ -140,7 +140,7 @@ Formalize the systematic method for detecting and handling edge cases — this i
 
 | Component         | Approach                                                       |
 |-------------------|----------------------------------------------------------------|
-| Engine language   | C++                                                            |
+| Engine language   | C (C17)                                                        |
 | Build system      | CMake                                                          |
 | HTML/CSS parsing  | Custom, built from spec                                        |
 | Layout engine     | Pairwise context transition model                              |

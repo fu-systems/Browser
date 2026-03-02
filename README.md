@@ -6,9 +6,9 @@ No cookies. No JavaScript. No tracking. No telemetry. Just HTML rendered in a wi
 
 ---
 
-## Current Phase: C++ Rendering Engine (Phase 2)
+## Current Phase: C Rendering Engine (Phase 2)
 
-The project is pivoting from the Phase 1 Dart/Flutter prototype to a **ground-up C++ rendering engine** built directly from the HTML and CSS specifications.
+The project is pivoting from the Phase 1 Dart/Flutter prototype to a **ground-up C rendering engine** built directly from the HTML and CSS specifications.
 
 The approach:
 

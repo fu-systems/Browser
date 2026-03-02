@@ -389,6 +389,59 @@ add("will-change", "CSS Will Change", "auto | <animateable-feature>#", "auto", F
 add("appearance", "CSS UI", "none | auto", "none", False, "all elements", False, False, False, "discrete")
 add("all", "CSS Cascade", "initial | inherit | unset | revert | revert-layer", "see individual properties", False, "all elements", False, False, False, "see individual properties")
 
+# === ANCHOR POSITIONING ===
+add("anchor-name", "CSS Anchor Positioning", "none | <dashed-ident>#", "none", False, "all elements", False, False, False, "discrete")
+add("anchor-scope", "CSS Anchor Positioning", "none | all | <dashed-ident>#", "none", False, "all elements", False, False, False, "discrete")
+add("position-anchor", "CSS Anchor Positioning", "auto | <anchor-element>", "auto", False, "absolutely positioned elements", False, False, False, "discrete")
+add("position-area", "CSS Anchor Positioning", "none | <position-area>", "none", False, "absolutely positioned elements", False, False, False, "discrete")
+add("position-try", "CSS Anchor Positioning", "[ <dashed-ident> | <try-tactic> ]#", "none", False, "absolutely positioned elements", False, False, False, "discrete")
+add("position-try-fallbacks", "CSS Anchor Positioning", "none | [ <dashed-ident> | <try-tactic> ]#", "none", False, "absolutely positioned elements", False, False, False, "discrete")
+add("position-try-order", "CSS Anchor Positioning", "normal | <try-size>", "normal", False, "absolutely positioned elements", False, False, False, "discrete")
+add("position-visibility", "CSS Anchor Positioning", "always | anchors-visible | no-overflow", "always", False, "absolutely positioned elements", False, False, False, "discrete")
+
+# === VIEW TRANSITIONS ===
+add("view-transition-name", "CSS View Transitions", "none | <custom-ident>", "none", False, "all elements", False, False, False, "discrete")
+add("view-transition-class", "CSS View Transitions", "none | <custom-ident>+", "none", False, "all elements", False, False, False, "discrete")
+
+# === CSS RUBY ===
+add("ruby-align", "CSS Ruby", "space-around | center | start | space-between", "space-around", True, "ruby annotation containers", False, False, False, "discrete")
+add("ruby-position", "CSS Ruby", "alternate | over | under | inter-character", "alternate", True, "ruby annotation containers", False, False, False, "discrete")
+
+# === CSS MATH (MathML) ===
+add("math-style", "CSS MathML", "normal | compact", "normal", True, "all elements", False, False, False, "discrete")
+add("math-depth", "CSS MathML", "auto-add | add(<integer>) | <integer>", "0", True, "all elements", False, False, False, "by computed value type")
+add("math-shift", "CSS MathML", "normal | compact", "normal", True, "all elements", False, False, False, "discrete")
+
+# === CSS TEXT LEVEL 4 (additions) ===
+add("text-autospace", "CSS Text", "normal | no-autospace | [ ideograph-alpha || ideograph-numeric || punctuation ] || [ insert | replace ]", "normal", True, "block containers", False, False, False, "discrete")
+add("text-spacing-trim", "CSS Text", "normal | space-all | space-first | trim-start | trim-both | trim-all", "normal", True, "block containers", False, False, False, "discrete")
+add("initial-letter", "CSS Inline", "normal | <number> <integer>?", "normal", False, "::first-letter pseudo-elements and inline-level first children of block containers", False, False, False, "discrete")
+add("initial-letter-align", "CSS Inline", "auto | alphabetic | hanging | ideographic", "auto", False, "::first-letter pseudo-elements and inline-level first children of block containers", False, False, False, "discrete")
+
+# === SVG CSS PROPERTIES ===
+add("fill", "CSS SVG", "<paint>", "black", True, "SVG graphics elements and text content elements", False, False, False, "by computed value type")
+add("fill-opacity", "CSS SVG", "<number [0,1]>", "1", True, "SVG graphics elements", False, False, False, "by computed value type")
+add("fill-rule", "CSS SVG", "nonzero | evenodd", "nonzero", True, "SVG graphics elements", False, False, False, "discrete")
+add("stroke", "CSS SVG", "<paint>", "none", True, "SVG graphics elements and text content elements", False, False, False, "by computed value type")
+add("stroke-dasharray", "CSS SVG", "none | <dasharray>", "none", True, "SVG graphics elements", False, False, False, "by computed value type")
+add("stroke-dashoffset", "CSS SVG", "<length-percentage>", "0", True, "SVG graphics elements", False, False, False, "by computed value type")
+add("stroke-linecap", "CSS SVG", "butt | round | square", "butt", True, "SVG graphics elements", False, False, False, "discrete")
+add("stroke-linejoin", "CSS SVG", "miter | round | bevel", "miter", True, "SVG graphics elements", False, False, False, "discrete")
+add("stroke-miterlimit", "CSS SVG", "<number>", "4", True, "SVG graphics elements", False, False, False, "by computed value type")
+add("stroke-opacity", "CSS SVG", "<number [0,1]>", "1", True, "SVG graphics elements", False, False, False, "by computed value type")
+add("stroke-width", "CSS SVG", "<length-percentage>", "1", True, "SVG graphics elements", False, False, False, "by computed value type")
+add("paint-order", "CSS SVG", "normal | [ fill || stroke || markers ]", "normal", True, "SVG graphics elements and text content elements", False, False, False, "discrete")
+add("marker-start", "CSS SVG", "none | <url>", "none", True, "SVG shape elements", False, False, False, "discrete")
+add("marker-mid", "CSS SVG", "none | <url>", "none", True, "SVG shape elements", False, False, False, "discrete")
+add("marker-end", "CSS SVG", "none | <url>", "none", True, "SVG shape elements", False, False, False, "discrete")
+add("color-interpolation", "CSS SVG", "auto | sRGB | linearRGB", "sRGB", True, "SVG container elements, graphics elements, gradient elements", False, False, False, "discrete")
+add("color-interpolation-filters", "CSS SVG", "auto | sRGB | linearRGB", "linearRGB", True, "SVG filter primitive elements", False, False, False, "discrete")
+add("dominant-baseline", "CSS SVG", "auto | text-bottom | alphabetic | ideographic | middle | central | mathematical | hanging | text-top", "auto", False, "SVG text content elements, inline-level elements", False, False, False, "discrete")
+add("text-anchor", "CSS SVG", "start | middle | end", "start", True, "SVG text content elements", False, False, False, "discrete")
+add("stop-color", "CSS SVG", "<color>", "black", False, "SVG stop elements", False, False, False, "by computed value type")
+add("stop-opacity", "CSS SVG", "<number [0,1]>", "1", False, "SVG stop elements", False, False, False, "by computed value type")
+add("vector-effect", "CSS SVG", "none | non-scaling-stroke | non-scaling-size | non-rotation | fixed-position", "none", False, "SVG graphics elements", False, False, False, "discrete")
+
 # === OUTPUT ===
 with open("/home/user/Browser/catalog/css_properties.json", "w") as f:
     json.dump(properties, f, indent=2)
