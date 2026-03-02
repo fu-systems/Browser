@@ -1,0 +1,1325 @@
+[
+  {
+    "tag": "html",
+    "category": ["root"],
+    "content_model": "head then body",
+    "default_display": "block",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Root element of the document"
+  },
+  {
+    "tag": "head",
+    "category": ["metadata"],
+    "content_model": "metadata content",
+    "default_display": "none",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Container for document metadata"
+  },
+  {
+    "tag": "title",
+    "category": ["metadata"],
+    "content_model": "text",
+    "default_display": "none",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Document title shown in browser tab"
+  },
+  {
+    "tag": "base",
+    "category": ["metadata", "void"],
+    "content_model": "empty",
+    "default_display": "none",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Base URL for relative URLs in the document"
+  },
+  {
+    "tag": "link",
+    "category": ["metadata", "void"],
+    "content_model": "empty",
+    "default_display": "none",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "External resource link (stylesheets, icons, etc.)"
+  },
+  {
+    "tag": "meta",
+    "category": ["metadata", "void"],
+    "content_model": "empty",
+    "default_display": "none",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Document metadata (charset, viewport, etc.)"
+  },
+  {
+    "tag": "style",
+    "category": ["metadata"],
+    "content_model": "text (CSS)",
+    "default_display": "none",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Embedded CSS stylesheet"
+  },
+  {
+    "tag": "script",
+    "category": ["metadata", "flow", "phrasing"],
+    "content_model": "text (script)",
+    "default_display": "none",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Embedded or external script"
+  },
+  {
+    "tag": "noscript",
+    "category": ["metadata", "flow", "phrasing"],
+    "content_model": "varies by context",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Fallback content when scripting is disabled"
+  },
+  {
+    "tag": "template",
+    "category": ["metadata", "flow", "phrasing"],
+    "content_model": "anything (inert)",
+    "default_display": "none",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Inert template for client-side content generation"
+  },
+  {
+    "tag": "slot",
+    "category": ["flow", "phrasing"],
+    "content_model": "transparent",
+    "default_display": "contents",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Shadow DOM slot for content distribution"
+  },
+  {
+    "tag": "body",
+    "category": ["sectioning-root"],
+    "content_model": "flow",
+    "default_display": "block",
+    "default_styles": {"margin": "8px"},
+    "creates_formatting_context": true,
+    "notes": "Document body; establishes initial containing block"
+  },
+  {
+    "tag": "article",
+    "category": ["flow", "sectioning"],
+    "content_model": "flow",
+    "default_display": "block",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Self-contained composition"
+  },
+  {
+    "tag": "section",
+    "category": ["flow", "sectioning"],
+    "content_model": "flow",
+    "default_display": "block",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Generic section of a document"
+  },
+  {
+    "tag": "nav",
+    "category": ["flow", "sectioning"],
+    "content_model": "flow",
+    "default_display": "block",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Navigation links section"
+  },
+  {
+    "tag": "aside",
+    "category": ["flow", "sectioning"],
+    "content_model": "flow",
+    "default_display": "block",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Tangentially related content"
+  },
+  {
+    "tag": "h1",
+    "category": ["flow", "heading"],
+    "content_model": "phrasing",
+    "default_display": "block",
+    "default_styles": {"font-size": "2em", "font-weight": "bold", "margin-block-start": "0.67em", "margin-block-end": "0.67em"},
+    "creates_formatting_context": false,
+    "notes": "Heading level 1"
+  },
+  {
+    "tag": "h2",
+    "category": ["flow", "heading"],
+    "content_model": "phrasing",
+    "default_display": "block",
+    "default_styles": {"font-size": "1.5em", "font-weight": "bold", "margin-block-start": "0.83em", "margin-block-end": "0.83em"},
+    "creates_formatting_context": false,
+    "notes": "Heading level 2"
+  },
+  {
+    "tag": "h3",
+    "category": ["flow", "heading"],
+    "content_model": "phrasing",
+    "default_display": "block",
+    "default_styles": {"font-size": "1.17em", "font-weight": "bold", "margin-block-start": "1em", "margin-block-end": "1em"},
+    "creates_formatting_context": false,
+    "notes": "Heading level 3"
+  },
+  {
+    "tag": "h4",
+    "category": ["flow", "heading"],
+    "content_model": "phrasing",
+    "default_display": "block",
+    "default_styles": {"font-size": "1em", "font-weight": "bold", "margin-block-start": "1.33em", "margin-block-end": "1.33em"},
+    "creates_formatting_context": false,
+    "notes": "Heading level 4"
+  },
+  {
+    "tag": "h5",
+    "category": ["flow", "heading"],
+    "content_model": "phrasing",
+    "default_display": "block",
+    "default_styles": {"font-size": "0.83em", "font-weight": "bold", "margin-block-start": "1.67em", "margin-block-end": "1.67em"},
+    "creates_formatting_context": false,
+    "notes": "Heading level 5"
+  },
+  {
+    "tag": "h6",
+    "category": ["flow", "heading"],
+    "content_model": "phrasing",
+    "default_display": "block",
+    "default_styles": {"font-size": "0.67em", "font-weight": "bold", "margin-block-start": "2.33em", "margin-block-end": "2.33em"},
+    "creates_formatting_context": false,
+    "notes": "Heading level 6"
+  },
+  {
+    "tag": "hgroup",
+    "category": ["flow", "heading"],
+    "content_model": "h1-h6 and p elements",
+    "default_display": "block",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Heading group with subheadings"
+  },
+  {
+    "tag": "header",
+    "category": ["flow"],
+    "content_model": "flow (no header/footer descendants)",
+    "default_display": "block",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Introductory content or navigational aids"
+  },
+  {
+    "tag": "footer",
+    "category": ["flow"],
+    "content_model": "flow (no header/footer descendants)",
+    "default_display": "block",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Footer for nearest sectioning ancestor"
+  },
+  {
+    "tag": "address",
+    "category": ["flow"],
+    "content_model": "flow (no heading, sectioning, header, footer, address)",
+    "default_display": "block",
+    "default_styles": {"font-style": "italic"},
+    "creates_formatting_context": false,
+    "notes": "Contact information"
+  },
+  {
+    "tag": "main",
+    "category": ["flow"],
+    "content_model": "flow",
+    "default_display": "block",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Dominant content of the document body"
+  },
+  {
+    "tag": "p",
+    "category": ["flow"],
+    "content_model": "phrasing",
+    "default_display": "block",
+    "default_styles": {"margin-block-start": "1em", "margin-block-end": "1em"},
+    "creates_formatting_context": false,
+    "notes": "Paragraph"
+  },
+  {
+    "tag": "hr",
+    "category": ["flow", "void"],
+    "content_model": "empty",
+    "default_display": "block",
+    "default_styles": {"border-style": "inset", "border-width": "1px", "margin-block-start": "0.5em", "margin-block-end": "0.5em", "overflow": "hidden"},
+    "creates_formatting_context": false,
+    "notes": "Thematic break"
+  },
+  {
+    "tag": "pre",
+    "category": ["flow"],
+    "content_model": "phrasing",
+    "default_display": "block",
+    "default_styles": {"font-family": "monospace", "white-space": "pre", "margin-block-start": "1em", "margin-block-end": "1em"},
+    "creates_formatting_context": false,
+    "notes": "Preformatted text"
+  },
+  {
+    "tag": "blockquote",
+    "category": ["flow", "sectioning-root"],
+    "content_model": "flow",
+    "default_display": "block",
+    "default_styles": {"margin-block-start": "1em", "margin-block-end": "1em", "margin-inline-start": "40px", "margin-inline-end": "40px"},
+    "creates_formatting_context": false,
+    "notes": "Block quotation"
+  },
+  {
+    "tag": "ol",
+    "category": ["flow"],
+    "content_model": "li, script, template",
+    "default_display": "block",
+    "default_styles": {"margin-block-start": "1em", "margin-block-end": "1em", "padding-inline-start": "40px", "list-style-type": "decimal"},
+    "creates_formatting_context": false,
+    "notes": "Ordered list"
+  },
+  {
+    "tag": "ul",
+    "category": ["flow"],
+    "content_model": "li, script, template",
+    "default_display": "block",
+    "default_styles": {"margin-block-start": "1em", "margin-block-end": "1em", "padding-inline-start": "40px", "list-style-type": "disc"},
+    "creates_formatting_context": false,
+    "notes": "Unordered list"
+  },
+  {
+    "tag": "menu",
+    "category": ["flow"],
+    "content_model": "li, script, template",
+    "default_display": "block",
+    "default_styles": {"margin-block-start": "1em", "margin-block-end": "1em", "padding-inline-start": "40px", "list-style-type": "disc"},
+    "creates_formatting_context": false,
+    "notes": "Toolbar menu (semantically same as ul)"
+  },
+  {
+    "tag": "li",
+    "category": ["flow"],
+    "content_model": "flow",
+    "default_display": "list-item",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "List item"
+  },
+  {
+    "tag": "dl",
+    "category": ["flow"],
+    "content_model": "dt/dd groups, div, script, template",
+    "default_display": "block",
+    "default_styles": {"margin-block-start": "1em", "margin-block-end": "1em"},
+    "creates_formatting_context": false,
+    "notes": "Description list"
+  },
+  {
+    "tag": "dt",
+    "category": ["flow"],
+    "content_model": "flow (no header, footer, sectioning, heading)",
+    "default_display": "block",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Description term"
+  },
+  {
+    "tag": "dd",
+    "category": ["flow"],
+    "content_model": "flow",
+    "default_display": "block",
+    "default_styles": {"margin-inline-start": "40px"},
+    "creates_formatting_context": false,
+    "notes": "Description details"
+  },
+  {
+    "tag": "figure",
+    "category": ["flow", "sectioning-root"],
+    "content_model": "figcaption (optional) + flow",
+    "default_display": "block",
+    "default_styles": {"margin-block-start": "1em", "margin-block-end": "1em", "margin-inline-start": "40px", "margin-inline-end": "40px"},
+    "creates_formatting_context": false,
+    "notes": "Self-contained figure with optional caption"
+  },
+  {
+    "tag": "figcaption",
+    "category": ["flow"],
+    "content_model": "flow",
+    "default_display": "block",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Caption for a figure"
+  },
+  {
+    "tag": "div",
+    "category": ["flow"],
+    "content_model": "flow",
+    "default_display": "block",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Generic flow container"
+  },
+  {
+    "tag": "search",
+    "category": ["flow"],
+    "content_model": "flow",
+    "default_display": "block",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Search functionality container"
+  },
+  {
+    "tag": "a",
+    "category": ["flow", "phrasing", "interactive"],
+    "content_model": "transparent (no interactive descendants)",
+    "default_display": "inline",
+    "default_styles": {"color": "-webkit-link", "text-decoration": "underline", "cursor": "pointer"},
+    "creates_formatting_context": false,
+    "notes": "Hyperlink"
+  },
+  {
+    "tag": "em",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {"font-style": "italic"},
+    "creates_formatting_context": false,
+    "notes": "Stress emphasis"
+  },
+  {
+    "tag": "strong",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {"font-weight": "bold"},
+    "creates_formatting_context": false,
+    "notes": "Strong importance"
+  },
+  {
+    "tag": "small",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {"font-size": "smaller"},
+    "creates_formatting_context": false,
+    "notes": "Side comment, small print"
+  },
+  {
+    "tag": "s",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {"text-decoration": "line-through"},
+    "creates_formatting_context": false,
+    "notes": "No longer accurate or relevant content"
+  },
+  {
+    "tag": "cite",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {"font-style": "italic"},
+    "creates_formatting_context": false,
+    "notes": "Citation / title of a work"
+  },
+  {
+    "tag": "q",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Inline quotation; UA inserts quotes via ::before/::after"
+  },
+  {
+    "tag": "dfn",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing (no dfn descendants)",
+    "default_display": "inline",
+    "default_styles": {"font-style": "italic"},
+    "creates_formatting_context": false,
+    "notes": "Defining instance of a term"
+  },
+  {
+    "tag": "abbr",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Abbreviation with optional expansion via title attribute"
+  },
+  {
+    "tag": "ruby",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing, rt, rp",
+    "default_display": "ruby",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Ruby annotation (East Asian typography)"
+  },
+  {
+    "tag": "rt",
+    "category": ["phrasing"],
+    "content_model": "phrasing",
+    "default_display": "ruby-text",
+    "default_styles": {"font-size": "0.5em"},
+    "creates_formatting_context": false,
+    "notes": "Ruby text component"
+  },
+  {
+    "tag": "rp",
+    "category": ["phrasing"],
+    "content_model": "text",
+    "default_display": "none",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Ruby fallback parenthesis"
+  },
+  {
+    "tag": "data",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Machine-readable equivalent via value attribute"
+  },
+  {
+    "tag": "time",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Date/time with machine-readable datetime attribute"
+  },
+  {
+    "tag": "code",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {"font-family": "monospace"},
+    "creates_formatting_context": false,
+    "notes": "Code fragment"
+  },
+  {
+    "tag": "var",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {"font-style": "italic"},
+    "creates_formatting_context": false,
+    "notes": "Variable or placeholder"
+  },
+  {
+    "tag": "samp",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {"font-family": "monospace"},
+    "creates_formatting_context": false,
+    "notes": "Sample output"
+  },
+  {
+    "tag": "kbd",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {"font-family": "monospace"},
+    "creates_formatting_context": false,
+    "notes": "Keyboard input"
+  },
+  {
+    "tag": "sub",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {"vertical-align": "sub", "font-size": "smaller"},
+    "creates_formatting_context": false,
+    "notes": "Subscript"
+  },
+  {
+    "tag": "sup",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {"vertical-align": "super", "font-size": "smaller"},
+    "creates_formatting_context": false,
+    "notes": "Superscript"
+  },
+  {
+    "tag": "i",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {"font-style": "italic"},
+    "creates_formatting_context": false,
+    "notes": "Alternate voice / technical term"
+  },
+  {
+    "tag": "b",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {"font-weight": "bold"},
+    "creates_formatting_context": false,
+    "notes": "Bring attention to (stylistically offset)"
+  },
+  {
+    "tag": "u",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {"text-decoration": "underline"},
+    "creates_formatting_context": false,
+    "notes": "Unarticulated annotation (misspelling, proper name in Chinese)"
+  },
+  {
+    "tag": "mark",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {"background-color": "yellow", "color": "black"},
+    "creates_formatting_context": false,
+    "notes": "Highlighted/marked text"
+  },
+  {
+    "tag": "bdi",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {"unicode-bidi": "isolate"},
+    "creates_formatting_context": false,
+    "notes": "Bidirectional isolation"
+  },
+  {
+    "tag": "bdo",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {"unicode-bidi": "bidi-override"},
+    "creates_formatting_context": false,
+    "notes": "Bidirectional override"
+  },
+  {
+    "tag": "span",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Generic inline container"
+  },
+  {
+    "tag": "br",
+    "category": ["flow", "phrasing", "void"],
+    "content_model": "empty",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Line break"
+  },
+  {
+    "tag": "wbr",
+    "category": ["flow", "phrasing", "void"],
+    "content_model": "empty",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Word break opportunity"
+  },
+  {
+    "tag": "ins",
+    "category": ["flow", "phrasing"],
+    "content_model": "transparent",
+    "default_display": "inline",
+    "default_styles": {"text-decoration": "underline"},
+    "creates_formatting_context": false,
+    "notes": "Inserted text"
+  },
+  {
+    "tag": "del",
+    "category": ["flow", "phrasing"],
+    "content_model": "transparent",
+    "default_display": "inline",
+    "default_styles": {"text-decoration": "line-through"},
+    "creates_formatting_context": false,
+    "notes": "Deleted text"
+  },
+  {
+    "tag": "picture",
+    "category": ["flow", "phrasing", "embedded"],
+    "content_model": "source elements then one img",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Responsive image container"
+  },
+  {
+    "tag": "source",
+    "category": ["void"],
+    "content_model": "empty",
+    "default_display": "none",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Media source for picture/video/audio"
+  },
+  {
+    "tag": "img",
+    "category": ["flow", "phrasing", "embedded", "void"],
+    "content_model": "empty",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Image; replaced element with intrinsic dimensions"
+  },
+  {
+    "tag": "iframe",
+    "category": ["flow", "phrasing", "embedded", "interactive"],
+    "content_model": "empty (fallback text ignored)",
+    "default_display": "inline",
+    "default_styles": {"border": "2px inset", "width": "300px", "height": "150px"},
+    "creates_formatting_context": true,
+    "notes": "Nested browsing context; replaced element"
+  },
+  {
+    "tag": "embed",
+    "category": ["flow", "phrasing", "embedded", "interactive", "void"],
+    "content_model": "empty",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "External content plugin integration point"
+  },
+  {
+    "tag": "object",
+    "category": ["flow", "phrasing", "embedded", "interactive", "form-associated"],
+    "content_model": "param elements then transparent",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "External resource (image, nested browsing context, plugin)"
+  },
+  {
+    "tag": "param",
+    "category": ["void"],
+    "content_model": "empty",
+    "default_display": "none",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Parameter for object element (deprecated)"
+  },
+  {
+    "tag": "video",
+    "category": ["flow", "phrasing", "embedded", "interactive"],
+    "content_model": "source, track, then transparent (no media descendants)",
+    "default_display": "inline",
+    "default_styles": {"width": "300px", "height": "150px"},
+    "creates_formatting_context": false,
+    "notes": "Video player; replaced element"
+  },
+  {
+    "tag": "audio",
+    "category": ["flow", "phrasing", "embedded", "interactive"],
+    "content_model": "source, track, then transparent (no media descendants)",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Audio player"
+  },
+  {
+    "tag": "track",
+    "category": ["void"],
+    "content_model": "empty",
+    "default_display": "none",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Timed text track for media (subtitles, captions)"
+  },
+  {
+    "tag": "map",
+    "category": ["flow", "phrasing"],
+    "content_model": "transparent",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Image map"
+  },
+  {
+    "tag": "area",
+    "category": ["flow", "phrasing", "void"],
+    "content_model": "empty",
+    "default_display": "none",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Image map area (hyperlink or dead area)"
+  },
+  {
+    "tag": "canvas",
+    "category": ["flow", "phrasing", "embedded"],
+    "content_model": "transparent (fallback content)",
+    "default_display": "inline",
+    "default_styles": {"width": "300px", "height": "150px"},
+    "creates_formatting_context": false,
+    "notes": "Bitmap canvas for scripted graphics"
+  },
+  {
+    "tag": "svg",
+    "category": ["flow", "phrasing", "embedded"],
+    "content_model": "SVG namespace elements",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": true,
+    "notes": "SVG root element; establishes SVG formatting context"
+  },
+  {
+    "tag": "math",
+    "category": ["flow", "phrasing", "embedded"],
+    "content_model": "MathML namespace elements",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": true,
+    "notes": "MathML root element"
+  },
+  {
+    "tag": "table",
+    "category": ["flow"],
+    "content_model": "caption, colgroup, thead, tbody, tfoot, tr (in order)",
+    "default_display": "table",
+    "default_styles": {"border-collapse": "separate", "border-spacing": "2px", "border-color": "gray"},
+    "creates_formatting_context": true,
+    "notes": "Table; establishes table formatting context"
+  },
+  {
+    "tag": "caption",
+    "category": ["flow"],
+    "content_model": "flow (no table descendants)",
+    "default_display": "table-caption",
+    "default_styles": {"text-align": "center"},
+    "creates_formatting_context": false,
+    "notes": "Table caption"
+  },
+  {
+    "tag": "colgroup",
+    "category": [],
+    "content_model": "col elements (or span attribute with no children)",
+    "default_display": "table-column-group",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Table column group"
+  },
+  {
+    "tag": "col",
+    "category": ["void"],
+    "content_model": "empty",
+    "default_display": "table-column",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Table column"
+  },
+  {
+    "tag": "thead",
+    "category": [],
+    "content_model": "tr, script, template",
+    "default_display": "table-header-group",
+    "default_styles": {"vertical-align": "middle"},
+    "creates_formatting_context": false,
+    "notes": "Table head row group"
+  },
+  {
+    "tag": "tbody",
+    "category": [],
+    "content_model": "tr, script, template",
+    "default_display": "table-row-group",
+    "default_styles": {"vertical-align": "middle"},
+    "creates_formatting_context": false,
+    "notes": "Table body row group"
+  },
+  {
+    "tag": "tfoot",
+    "category": [],
+    "content_model": "tr, script, template",
+    "default_display": "table-footer-group",
+    "default_styles": {"vertical-align": "middle"},
+    "creates_formatting_context": false,
+    "notes": "Table footer row group"
+  },
+  {
+    "tag": "tr",
+    "category": [],
+    "content_model": "td, th, script, template",
+    "default_display": "table-row",
+    "default_styles": {"vertical-align": "inherit"},
+    "creates_formatting_context": false,
+    "notes": "Table row"
+  },
+  {
+    "tag": "td",
+    "category": ["sectioning-root"],
+    "content_model": "flow",
+    "default_display": "table-cell",
+    "default_styles": {"padding": "1px", "vertical-align": "inherit"},
+    "creates_formatting_context": true,
+    "notes": "Table data cell; establishes new BFC"
+  },
+  {
+    "tag": "th",
+    "category": ["sectioning-root"],
+    "content_model": "flow (no header, footer, sectioning, heading)",
+    "default_display": "table-cell",
+    "default_styles": {"padding": "1px", "font-weight": "bold", "text-align": "center", "vertical-align": "inherit"},
+    "creates_formatting_context": true,
+    "notes": "Table header cell; establishes new BFC"
+  },
+  {
+    "tag": "form",
+    "category": ["flow"],
+    "content_model": "flow (no form descendants)",
+    "default_display": "block",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Form for user input"
+  },
+  {
+    "tag": "label",
+    "category": ["flow", "phrasing", "interactive", "form-associated"],
+    "content_model": "phrasing (no label descendants)",
+    "default_display": "inline",
+    "default_styles": {"cursor": "default"},
+    "creates_formatting_context": false,
+    "notes": "Label for a form control"
+  },
+  {
+    "tag": "input",
+    "category": ["flow", "phrasing", "interactive", "form-associated", "void"],
+    "content_model": "empty",
+    "default_display": "inline-block",
+    "default_styles": {},
+    "creates_formatting_context": true,
+    "notes": "Form input; replaced element; type attribute changes behavior dramatically"
+  },
+  {
+    "tag": "button",
+    "category": ["flow", "phrasing", "interactive", "form-associated"],
+    "content_model": "phrasing (no interactive descendants)",
+    "default_display": "inline-block",
+    "default_styles": {"text-align": "center"},
+    "creates_formatting_context": true,
+    "notes": "Button; establishes new BFC for its contents"
+  },
+  {
+    "tag": "select",
+    "category": ["flow", "phrasing", "interactive", "form-associated"],
+    "content_model": "option, optgroup, hr, script, template",
+    "default_display": "inline-block",
+    "default_styles": {},
+    "creates_formatting_context": true,
+    "notes": "Drop-down or list box; replaced element"
+  },
+  {
+    "tag": "datalist",
+    "category": ["flow", "phrasing"],
+    "content_model": "phrasing or option elements",
+    "default_display": "none",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Predefined options for input controls"
+  },
+  {
+    "tag": "optgroup",
+    "category": [],
+    "content_model": "option, script, template",
+    "default_display": "block",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Group of options within a select"
+  },
+  {
+    "tag": "option",
+    "category": [],
+    "content_model": "text",
+    "default_display": "block",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Option in a select, datalist, or optgroup"
+  },
+  {
+    "tag": "textarea",
+    "category": ["flow", "phrasing", "interactive", "form-associated"],
+    "content_model": "text",
+    "default_display": "inline-block",
+    "default_styles": {"white-space": "pre-wrap", "font-family": "monospace"},
+    "creates_formatting_context": true,
+    "notes": "Multiline text input; replaced element"
+  },
+  {
+    "tag": "output",
+    "category": ["flow", "phrasing", "form-associated"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Result of a calculation"
+  },
+  {
+    "tag": "progress",
+    "category": ["flow", "phrasing", "form-associated"],
+    "content_model": "phrasing (no progress descendants)",
+    "default_display": "inline-block",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Progress indicator; replaced element"
+  },
+  {
+    "tag": "meter",
+    "category": ["flow", "phrasing", "form-associated"],
+    "content_model": "phrasing (no meter descendants)",
+    "default_display": "inline-block",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Scalar measurement within a known range"
+  },
+  {
+    "tag": "fieldset",
+    "category": ["flow", "sectioning-root", "form-associated"],
+    "content_model": "legend (optional first child), then flow",
+    "default_display": "block",
+    "default_styles": {"border": "2px groove", "padding-block-start": "0.35em", "padding-block-end": "0.625em", "padding-inline-start": "0.75em", "padding-inline-end": "0.75em", "min-inline-size": "min-content"},
+    "creates_formatting_context": true,
+    "notes": "Group of form controls with a legend"
+  },
+  {
+    "tag": "legend",
+    "category": [],
+    "content_model": "phrasing and heading elements",
+    "default_display": "block",
+    "default_styles": {"padding-inline-start": "2px", "padding-inline-end": "2px"},
+    "creates_formatting_context": false,
+    "notes": "Caption for a fieldset"
+  },
+  {
+    "tag": "details",
+    "category": ["flow", "interactive"],
+    "content_model": "summary (first child), then flow",
+    "default_display": "block",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Disclosure widget; open attribute toggles visibility"
+  },
+  {
+    "tag": "summary",
+    "category": [],
+    "content_model": "phrasing or one heading element",
+    "default_display": "block",
+    "default_styles": {"display": "list-item", "list-style-type": "disclosure-closed"},
+    "creates_formatting_context": false,
+    "notes": "Summary/label for a details element"
+  },
+  {
+    "tag": "dialog",
+    "category": ["flow"],
+    "content_model": "flow",
+    "default_display": "none",
+    "default_styles": {"position": "absolute", "width": "fit-content", "height": "fit-content", "border": "solid", "padding": "1em", "background": "white", "color": "black"},
+    "creates_formatting_context": true,
+    "notes": "Dialog box; when open, display:block. ::backdrop pseudo-element for modal"
+  },
+  {
+    "tag": "portal",
+    "category": ["flow", "phrasing", "embedded"],
+    "content_model": "empty",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "Preview of another page (experimental)"
+  },
+  {
+    "tag": "marquee",
+    "category": ["flow", "deprecated"],
+    "content_model": "flow",
+    "default_display": "inline-block",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Scrolling text"
+  },
+  {
+    "tag": "center",
+    "category": ["flow", "deprecated"],
+    "content_model": "flow",
+    "default_display": "block",
+    "default_styles": {"text-align": "center"},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Centered block (use CSS text-align or margin:auto)"
+  },
+  {
+    "tag": "font",
+    "category": ["phrasing", "deprecated"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Font face, size, color via attributes"
+  },
+  {
+    "tag": "big",
+    "category": ["phrasing", "deprecated"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {"font-size": "larger"},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Larger text"
+  },
+  {
+    "tag": "strike",
+    "category": ["phrasing", "deprecated"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {"text-decoration": "line-through"},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Strikethrough (use <s> or <del>)"
+  },
+  {
+    "tag": "tt",
+    "category": ["phrasing", "deprecated"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {"font-family": "monospace"},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Teletype text (use <code>/<samp>/<kbd>)"
+  },
+  {
+    "tag": "acronym",
+    "category": ["phrasing", "deprecated"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Acronym (use <abbr>)"
+  },
+  {
+    "tag": "applet",
+    "category": ["embedded", "deprecated"],
+    "content_model": "transparent",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Java applet (removed from spec)"
+  },
+  {
+    "tag": "basefont",
+    "category": ["metadata", "void", "deprecated"],
+    "content_model": "empty",
+    "default_display": "none",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Default font for the document"
+  },
+  {
+    "tag": "bgsound",
+    "category": ["metadata", "void", "deprecated"],
+    "content_model": "empty",
+    "default_display": "none",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Background sound (IE only)"
+  },
+  {
+    "tag": "blink",
+    "category": ["phrasing", "deprecated"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Blinking text (Netscape)"
+  },
+  {
+    "tag": "content",
+    "category": ["deprecated"],
+    "content_model": "transparent",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Shadow DOM v0 insertion point"
+  },
+  {
+    "tag": "dir",
+    "category": ["flow", "deprecated"],
+    "content_model": "li",
+    "default_display": "block",
+    "default_styles": {"margin-block-start": "1em", "margin-block-end": "1em", "padding-inline-start": "40px"},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Directory list (use <ul>)"
+  },
+  {
+    "tag": "frame",
+    "category": ["void", "deprecated"],
+    "content_model": "empty",
+    "default_display": "block",
+    "default_styles": {},
+    "creates_formatting_context": true,
+    "notes": "DEPRECATED: Frame within a frameset"
+  },
+  {
+    "tag": "frameset",
+    "category": ["deprecated"],
+    "content_model": "frame, frameset, noframes",
+    "default_display": "block",
+    "default_styles": {},
+    "creates_formatting_context": true,
+    "notes": "DEPRECATED: Set of frames (replaces body)"
+  },
+  {
+    "tag": "image",
+    "category": ["deprecated"],
+    "content_model": "empty",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Alias for <img> (non-standard)"
+  },
+  {
+    "tag": "isindex",
+    "category": ["deprecated", "void"],
+    "content_model": "empty",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Single-line text input (pre-forms)"
+  },
+  {
+    "tag": "keygen",
+    "category": ["flow", "phrasing", "form-associated", "void", "deprecated"],
+    "content_model": "empty",
+    "default_display": "inline-block",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Key pair generator (removed from spec)"
+  },
+  {
+    "tag": "listing",
+    "category": ["flow", "deprecated"],
+    "content_model": "text",
+    "default_display": "block",
+    "default_styles": {"font-family": "monospace", "white-space": "pre"},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Preformatted listing (use <pre>)"
+  },
+  {
+    "tag": "menuitem",
+    "category": ["deprecated"],
+    "content_model": "empty",
+    "default_display": "none",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Command in a context menu"
+  },
+  {
+    "tag": "multicol",
+    "category": ["flow", "deprecated"],
+    "content_model": "flow",
+    "default_display": "block",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Multi-column layout (Netscape, use CSS columns)"
+  },
+  {
+    "tag": "nextid",
+    "category": ["metadata", "void", "deprecated"],
+    "content_model": "empty",
+    "default_display": "none",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Auto-generated ID (very early HTML)"
+  },
+  {
+    "tag": "nobr",
+    "category": ["phrasing", "deprecated"],
+    "content_model": "phrasing",
+    "default_display": "inline",
+    "default_styles": {"white-space": "nowrap"},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: No line break (use CSS white-space)"
+  },
+  {
+    "tag": "noembed",
+    "category": ["deprecated"],
+    "content_model": "text",
+    "default_display": "none",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Fallback for embed"
+  },
+  {
+    "tag": "noframes",
+    "category": ["deprecated"],
+    "content_model": "text",
+    "default_display": "none",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Fallback for frameset"
+  },
+  {
+    "tag": "plaintext",
+    "category": ["deprecated"],
+    "content_model": "text (rest of document as plain text)",
+    "default_display": "block",
+    "default_styles": {"font-family": "monospace", "white-space": "pre"},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Render rest of document as plain text"
+  },
+  {
+    "tag": "rb",
+    "category": ["phrasing", "deprecated"],
+    "content_model": "phrasing",
+    "default_display": "ruby-base",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Ruby base (use implicit base in ruby)"
+  },
+  {
+    "tag": "rtc",
+    "category": ["phrasing", "deprecated"],
+    "content_model": "phrasing, rt",
+    "default_display": "ruby-text-container",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Ruby text container"
+  },
+  {
+    "tag": "shadow",
+    "category": ["deprecated"],
+    "content_model": "transparent",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Shadow DOM v0 shadow root"
+  },
+  {
+    "tag": "spacer",
+    "category": ["deprecated", "void"],
+    "content_model": "empty",
+    "default_display": "inline",
+    "default_styles": {},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Whitespace (Netscape)"
+  },
+  {
+    "tag": "xmp",
+    "category": ["flow", "deprecated"],
+    "content_model": "text",
+    "default_display": "block",
+    "default_styles": {"font-family": "monospace", "white-space": "pre"},
+    "creates_formatting_context": false,
+    "notes": "DEPRECATED: Example text (use <pre><code>)"
+  }
+]
