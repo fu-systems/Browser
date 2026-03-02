@@ -16,6 +16,10 @@ CMakeCache.txt
 *.iws
 compile_commands.json
 
+# Archive build artifacts
+archive/phase1-dart/dist/
+archive/phase1-dart/build/
+
 # Misc
 *.swp
 *.swo
