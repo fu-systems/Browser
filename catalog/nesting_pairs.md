@@ -1,581 +1,1129 @@
-# HTML Element Nesting Pairs — Browser Behavior Catalog
+# HTML Element Nesting Pairs — Exhaustive Pair Rule Catalog
 
-This document catalogs every valid and notable invalid parent-child element nesting pair, and how Chrome and Firefox handle each case. This is the empirical input for the pairwise context transition engine.
+Research document for deriving the minimal chained-pair rule set for the Pane parser.
 
-## How This Document Is Organized
-
-Elements are grouped into **nesting categories** based on their content model (what children they accept). For each parent category, every possible child category is listed with:
-
-- **Valid?** — whether the spec allows this nesting
-- **Browser behavior** — what Chrome/Firefox actually do (layout + parser)
-- **Pairwise note** — what the transition engine needs to know
+Every non-void HTML element is listed as a parent. For each parent, every possible child element is classified into an **action** — the exact thing Chrome/Firefox do when that child tag is encountered inside that parent. The goal: reduce ~14,000 raw pairs into a small set of **pair rules** that chain.
 
 ---
 
-## Element-to-Category Mapping
+## Pair Rule Actions (the complete set)
 
-### Category A — Void Elements (cannot be parents)
+Every parent→child pair resolves to exactly one of these actions:
 
-`area`, `base`, `br`, `col`, `embed`, `hr`, `img`, `input`, `link`, `meta`, `param`, `source`, `track`, `wbr`
-
-These elements have no children. The parser ignores any content placed inside them. No nesting pairs originate from these as parents.
-
-### Category B — Raw Text / Metadata (text-only content)
-
-`title`, `style`, `script`, `textarea`, `option`, `rp`
-
-These elements contain only raw text (no child elements parsed). The parser treats all markup inside them as text.
-
-### Category C — Phrasing Content Containers
-
-`abbr`, `b`, `bdi`, `bdo`, `cite`, `code`, `data`, `dfn`, `em`, `i`, `kbd`, `label`, `mark`, `output`, `q`, `rt`, `s`, `samp`, `small`, `span`, `strong`, `sub`, `sup`, `time`, `u`, `var`
-
-Accept phrasing content (inline elements + text). Cannot directly contain block elements.
-
-### Category D — Phrasing Containers (Block Display)
-
-`h1`, `h2`, `h3`, `h4`, `h5`, `h6`, `p`, `pre`
-
-Accept phrasing content only, but render as block-level. A `<div>` inside a `<p>` triggers auto-close.
-
-### Category E — Flow Content Containers
-
-`article`, `aside`, `blockquote`, `body`, `dd`, `div`, `figcaption`, `figure`, `footer`, `header`, `li`, `main`, `nav`, `search`, `section`, `address`, `dialog`, `details`, `fieldset`, `form`, `td`, `th`, `dt`, `legend`, `summary`, `caption`, `noscript`
-
-Accept flow content (both block and inline elements). These are the most permissive parents.
-
-### Category F — Transparent Content Model
-
-`a`, `ins`, `del`, `map`, `canvas`, `object`, `slot`
-
-Transparent means: inherits the content model of its parent. If `<a>` is inside a flow container, it can contain flow. If inside a phrasing container, it can only contain phrasing.
-
-### Category G — List Containers
-
-`ul`, `ol`, `menu` — accept only `li` (+ `script`, `template`)
-`dl` — accepts only `dt`, `dd`, `div` (+ `script`, `template`)
-
-### Category H — Table Containers
-
-`table` — accepts `caption`, `colgroup`, `thead`, `tbody`, `tfoot`, `tr`
-`thead`, `tbody`, `tfoot` — accept only `tr` (+ `script`, `template`)
-`tr` — accepts only `td`, `th` (+ `script`, `template`)
-`colgroup` — accepts only `col`
-
-### Category I — Select/Option Containers
-
-`select` — accepts `option`, `optgroup`, `hr`
-`optgroup` — accepts only `option`
-`datalist` — accepts `option` + phrasing
-
-### Category J — Media Containers
-
-`video`, `audio` — accept `source`, `track`, then transparent content
-`picture` — accepts `source` elements then one `img`
-
-### Category K — Special Containers
-
-`html` — accepts `head` then `body` only
-`head` — accepts metadata content (`title`, `meta`, `link`, `style`, `script`, `base`, `noscript`)
-`ruby` — accepts phrasing + `rt` + `rp`
-`hgroup` — accepts `h1`–`h6` + `p`
-`template` — accepts anything (inert, not rendered)
-`button` — accepts phrasing (no interactive descendants)
-`svg` — accepts SVG namespace elements
-`math` — accepts MathML namespace elements
+| # | Action | Code | Description |
+|---|--------|------|-------------|
+| 1 | **Accept** | `ACCEPT` | Child is valid. Parser inserts it as a child node. |
+| 2 | **Auto-close parent** | `CLOSE_PARENT` | Parent is implicitly closed first, child becomes a sibling of the (now-closed) parent. |
+| 3 | **Foster parent** | `FOSTER` | Child is moved before the nearest table ancestor. Table-context only. |
+| 4 | **Auto-generate wrapper** | `WRAP(x)` | Missing intermediate element(s) `x` are auto-generated. Child is inserted inside the generated wrapper. |
+| 5 | **Drop tag** | `DROP` | The child's start tag is ignored entirely. Its content (if any) is adopted by the current parent. |
+| 6 | **Reconstruct formatting** | `RECONSTRUCT` | Active formatting elements (b, i, em, strong, a, etc.) are reconstructed in the new insertion context after a tree split. |
+| 7 | **Close-and-reopen** | `CLOSE_REOPEN` | Current element of same type is closed, new one opens (e.g., `<li>` inside `<li>`). |
+| 8 | **Raw text mode** | `RAW_TEXT` | Parser switches to raw text / RCDATA mode. No child elements parsed — everything until the end tag is text. |
+| 9 | **Foreign content** | `FOREIGN` | Switches to SVG or MathML parsing mode. |
+| 10 | **Void — no children** | `VOID` | Parent is void. Child is impossible — parser never enters this state. |
 
 ---
 
-## Nesting Pair Interactions
+## Part 1 — Every Element as Parent (Exhaustive)
 
-### 1. Flow Container (E) as Parent
-
-**Parent elements:** `div`, `article`, `section`, `nav`, `aside`, `main`, `body`, `blockquote`, `dd`, `li`, `td`, `th`, `figcaption`, `figure`, `footer`, `header`, `form`, `fieldset`, `details`, `dialog`, `search`, `address`, `dt`, `legend`, `summary`, `caption`, `noscript`
-
-#### 1.1 Flow (E) → Block Child (E, D, G, H)
-
-- `div > div`, `section > article`, `li > blockquote`, `td > div`, etc.
-- **Valid:** Yes
-- **Chrome/Firefox:** Block child generates a block-level box. Stacks vertically in normal flow. Margins collapse with parent and siblings per CSS 2.1 §8.3.1. If parent has padding or border, margin collapse is blocked.
-- **Pairwise note:** Formatting context remains `block`. Containing block is the parent's content box. Margin collapsing rules apply — context must carry a `margin_collapse_through` flag.
-
-#### 1.2 Flow (E) → Inline Child (C, F)
-
-- `div > span`, `section > em`, `li > a`, `td > strong`, etc.
-- **Valid:** Yes
-- **Chrome/Firefox:** Inline child participates in an anonymous inline formatting context. If block and inline siblings coexist, Chrome/Firefox generate anonymous block boxes around consecutive inline runs (CSS 2.1 §9.2.1.1).
-- **Pairwise note:** Transition creates an inline formatting context inside the block. Engine must handle anonymous box generation when mixed block/inline children exist.
-
-#### 1.3 Flow (E) → Heading Child (D)
-
-- `div > h1`, `section > h3`, `article > h2`
-- **Valid:** Yes
-- **Chrome/Firefox:** Heading renders as a block box with UA margins and font-size. Participates in normal block flow. Outline algorithm uses headings for section structure.
-- **Pairwise note:** Same as 1.1 (block in block). UA stylesheet overrides (font-size, weight, margins) are inherited property changes in the context.
-
-#### 1.4 Flow (E) → Paragraph (D: `p`)
-
-- `div > p`, `section > p`, `li > p`
-- **Valid:** Yes
-- **Chrome/Firefox:** `<p>` renders as block with UA margins (1em top/bottom). Key parser behavior: `<p>` auto-closes when it encounters another block-level start tag.
-- **Pairwise note:** Standard block-in-block. The auto-close behavior is parser-level, not layout-level.
-
-#### 1.5 Flow (E) → List Container (G)
-
-- `div > ul`, `section > ol`, `td > dl`
-- **Valid:** Yes
-- **Chrome/Firefox:** List renders as block with UA padding-inline-start (40px). Nested lists suppress top/bottom margins. Chrome/Firefox both apply `margin-block-start: 0; margin-block-end: 0` on nested `<ul>/<ol>` (child of `<li>`).
-- **Pairwise note:** Standard block-in-block. Nested list margin suppression is a UA stylesheet rule, not a layout algorithm change.
-
-#### 1.6 Flow (E) → Table (H: `table`)
-
-- `div > table`, `section > table`, `td > table`
-- **Valid:** Yes
-- **Chrome/Firefox:** Table establishes a **table formatting context**. The table box is a block-level box with `display: table`. Chrome/Firefox generate anonymous table parts if required (missing `tbody`, etc.). Table width algorithm is independent (fixed or auto). Table cells establish new BFCs.
-- **Pairwise note:** **Context transition from block → table.** New formatting context type. Containing block changes to the table's content box for internal elements. This is a major pairwise transition.
-
-#### 1.7 Flow (E) → Form Elements
-
-- `div > input`, `div > button`, `div > select`, `div > textarea`
-- **Valid:** Yes
-- **Chrome/Firefox:** Form controls are replaced elements (or behave like them). `input`, `select`, `textarea` render as `inline-block`. `button` renders as `inline-block` and establishes a new BFC for its contents. Sizing depends on the control type and platform.
-- **Pairwise note:** Replaced elements have intrinsic dimensions. The context transition notes that the child is replaced and uses its intrinsic size rather than flowing content.
-
-#### 1.8 Flow (E) → Embedded Content (`img`, `video`, `iframe`, `canvas`, `svg`)
-
-- `div > img`, `section > video`, `td > iframe`
-- **Valid:** Yes
-- **Chrome/Firefox:** These are inline-level replaced elements. `img` uses intrinsic dimensions. `iframe` defaults to 300×150. `svg` establishes an SVG formatting context. `canvas` defaults to 300×150.
-- **Pairwise note:** Replaced element handling. Child has intrinsic aspect ratio. `svg` and `math` are special — they establish entirely different formatting contexts (SVG/MathML).
-
-#### 1.9 Flow (E) → Void Element
-
-- `div > br`, `div > hr`, `p > br`
-- **Valid:** Yes
-- **Chrome/Firefox:** `br` inserts a line break in inline flow. `hr` generates a block-level box with UA border/margins. `br` is special — it's inline but forces a newline.
-- **Pairwise note:** `br` and `hr` are special cases. `br` affects inline layout. `hr` is a block box.
-
-#### 1.10 Flow (E) → Invalid: Another `<form>` inside `<form>`
-
-- `form > form`
-- **Valid:** No (spec forbids nested forms)
-- **Chrome/Firefox:** **Parser drops the inner `<form>` tag entirely.** The inner form's children become children of the outer form. The inner `</form>` tag closes nothing (it's already been ignored).
-- **Pairwise note:** Parser-level restriction, not layout. Engine parser must track open form elements and reject nested ones.
-
-#### 1.11 Flow (E) → `template`
-
-- `div > template`
-- **Valid:** Yes
-- **Chrome/Firefox:** `template` content is parsed into a DocumentFragment but not rendered. `display: none` by default. The content exists in the DOM but generates no boxes.
-- **Pairwise note:** No layout impact. Template children are inert.
-
-#### 1.12 Flow (E) → `script`, `style`
-
-- `div > script`, `div > style`
-- **Valid:** Yes
-- **Chrome/Firefox:** `display: none`. No boxes generated. Content is text (CSS or JavaScript). In Pane, JavaScript is disabled by default, so `script` is always inert.
-- **Pairwise note:** No layout impact. Skip in layout tree.
+For each parent, children are grouped by action. "All remaining" means every element not listed in a specific action group.
 
 ---
 
-### 2. Phrasing Container — Block Display (D) as Parent
+### `html`
 
-**Parent elements:** `p`, `h1`–`h6`, `pre`
+**Content model:** `head` then `body`
+**Insertion mode:** BeforeHead / AfterHead
 
-These accept **only phrasing content** (inline elements + text). Block elements are NOT valid children.
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | `head`, `body` | Only valid direct children. `head` must come first, `body` second. |
+| WRAP(head) | Any tag before `head` is seen | Parser auto-generates `<head>`, processes tag in "in head" mode. |
+| WRAP(body) | Any tag after `head` closes | Parser auto-generates `<body>`, processes tag in "in body" mode. |
 
-#### 2.1 Phrasing-Block (D) → Inline Child (C)
-
-- `p > span`, `h1 > em`, `pre > code`
-- **Valid:** Yes
-- **Chrome/Firefox:** Normal inline layout. Text and inline elements flow left-to-right (or per direction), line-wrap when they hit the containing block edge.
-- **Pairwise note:** Standard phrasing-in-phrasing. No context change.
-
-#### 2.2 Phrasing-Block (D) → Inline Replaced
-
-- `p > img`, `h1 > br`, `p > input`
-- **Valid:** Yes
-- **Chrome/Firefox:** Replaced element participates in inline flow. `img` uses intrinsic dimensions. `input` renders as inline-block. `br` forces a line break.
-- **Pairwise note:** Same inline formatting context. Replaced element has intrinsic size.
-
-#### 2.3 Phrasing-Block (D) → **INVALID: Block Child**
-
-- `p > div`, `p > blockquote`, `p > ul`, `p > table`, `p > h2`, `p > p`
-- **Valid:** No
-- **Chrome/Firefox:** **Parser auto-closes the `<p>` tag.** When the parser encounters a block-level start tag inside `<p>`, it implicitly closes the `<p>` first, then opens the block element as a sibling.
-
-  Example: `<p>Hello <div>World</div></p>`
-  Parsed as: `<p>Hello</p> <div>World</div> <p></p>`
-
-  Chrome and Firefox agree on this behavior. The trailing `</p>` creates an empty `<p>` after the div (or is ignored if no content follows).
-
-- **Pairwise note:** **Critical parser rule.** The engine parser must know which elements auto-close `<p>`. The full list: `address`, `article`, `aside`, `blockquote`, `center`, `details`, `dialog`, `dir`, `div`, `dl`, `fieldset`, `figcaption`, `figure`, `footer`, `form`, `h1`–`h6`, `header`, `hgroup`, `hr`, `li`, `main`, `menu`, `nav`, `ol`, `p`, `pre`, `search`, `section`, `summary`, `table`, `ul`.
-
-#### 2.4 Heading (D) → **INVALID: Another Heading**
-
-- `h1 > h2`, `h2 > h3`
-- **Valid:** No (headings accept phrasing only, headings are flow)
-- **Chrome/Firefox:** **Parser auto-closes the first heading.** `<h1>foo <h2>bar</h2></h1>` becomes `<h1>foo</h1> <h2>bar</h2>`.
-- **Pairwise note:** Same auto-close mechanism as `<p>`. Headings cannot nest.
+**Chained pair rule:** `html` never appears mid-document. Its behavior is bootstrapping — generates `head`/`body` wrappers. Not relevant for chained pair analysis.
 
 ---
 
-### 3. Phrasing Container — Inline Display (C) as Parent
+### `head`
 
-**Parent elements:** `span`, `em`, `strong`, `b`, `i`, `u`, `s`, `small`, `code`, `var`, `samp`, `kbd`, `sub`, `sup`, `abbr`, `bdi`, `bdo`, `cite`, `data`, `dfn`, `mark`, `q`, `time`, `output`, `label`
+**Content model:** Metadata content only
+**Insertion mode:** InHead
 
-These accept phrasing content. They render as inline boxes.
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | `title`, `meta`, `link`, `style`, `script`, `noscript`, `base`, `template` | Valid metadata children. Parsed normally. |
+| CLOSE_PARENT | `body`, `html`, `br` | Encountering these closes `<head>` implicitly, parser switches to AfterHead/InBody mode. `br` is special — treated as if `</head>` was seen. |
+| CLOSE_PARENT | Any flow/phrasing element (`div`, `p`, `span`, `h1`, `a`, etc.) | Parser implicitly closes `<head>`, opens `<body>`, and re-processes the tag in body mode. |
+| DROP | `head` (duplicate) | Second `<head>` tag is ignored. |
 
-#### 3.1 Inline (C) → Inline Child (C)
-
-- `span > em`, `strong > code`, `em > span`
-- **Valid:** Yes
-- **Chrome/Firefox:** Nested inline boxes. Each creates an inline box. They participate in the same inline formatting context. CSS properties like `font-style`, `font-weight`, `color` cascade into children.
-- **Pairwise note:** No context change. Inherited properties update in the context.
-
-#### 3.2 Inline (C) → Inline Replaced
-
-- `span > img`, `em > br`, `label > input`
-- **Valid:** Yes
-- **Chrome/Firefox:** Replaced element inline with text. `img` has intrinsic size. `input` renders as inline-block (creates a new BFC for its contents).
-- **Pairwise note:** Inline context. Replaced elements get special sizing.
-
-#### 3.3 Inline (C) → **INVALID: Block Child**
-
-- `span > div`, `em > p`, `code > blockquote`
-- **Valid:** No
-- **Chrome/Firefox:** **Unlike `<p>`, inline elements do NOT auto-close.** The parser accepts the block element as a child. Chrome/Firefox then split the inline box around the block:
-
-  `<span>Hello <div>World</div> Bye</span>` renders as:
-  ```
-  <span>Hello </span>
-  <div>World</div>
-  <span> Bye</span>
-  ```
-
-  The inline is split into fragments before and after the block. This is defined in CSS 2.1 §9.2.1.1 as "anonymous block boxes" wrapping the inline fragments.
-
-- **Pairwise note:** **Major pairwise transition.** When a block appears inside an inline, the engine must:
-  1. Close the current inline formatting context
-  2. Generate anonymous block boxes around inline fragments
-  3. Render the block child in normal block flow
-  4. Resume the inline formatting context after the block
-  This is one of the most complex interactions in layout.
+**Chained pair rule:** `head` auto-closes on any non-metadata tag → becomes `body` context. Single rule covers all cases.
 
 ---
 
-### 4. Transparent Elements (F) as Parent
+### `body`
 
-**Parent elements:** `a`, `ins`, `del`, `map`, `canvas`, `object`, `slot`
+**Content model:** Flow content
+**Insertion mode:** InBody
 
-Transparent elements inherit the content model of their parent.
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | All flow content elements | `body` accepts everything that's valid in InBody mode. This is the default context for the entire document. |
 
-#### 4.1 Transparent in Flow → Block Child
-
-- `<div><a href="#"><div>...</div></a></div>`
-- **Valid:** Yes (because `<a>` is in flow context, so it inherits flow content model)
-- **Chrome/Firefox:** The `<a>` wraps a block-level child. Chrome/Firefox render the `<a>` as a block-level anonymous box around the `<div>`. The link is clickable on the entire block.
-- **Pairwise note:** Transparent element inherits parent's formatting context. The context object passes through unchanged.
-
-#### 4.2 Transparent in Phrasing → Block Child
-
-- `<p><a href="#"><div>...</div></a></p>`
-- **Valid:** No (because `<a>` inherits phrasing-only from `<p>`)
-- **Chrome/Firefox:** `<p>` auto-closes when `<div>` is encountered. Parser reconstructs as: `<p><a href="#"></a></p><div><a href="#">...</a></div><p></p>`. The `<a>` is split across the paragraph boundary.
-- **Pairwise note:** Parser-level. The transparent element doesn't override its parent's content model.
-
-#### 4.3 `<a>` → **INVALID: Interactive Child**
-
-- `a > a`, `a > button`, `a > select`, `a > textarea`, `a > details`
-- **Valid:** No (no interactive descendants allowed)
-- **Chrome/Firefox:** Chrome: the inner interactive element is extracted from the `<a>` — the `<a>` is split around it. Firefox: similar reconstruction. The inner `<a>` is ignored and its content becomes part of the outer `<a>`.
-- **Pairwise note:** Parser-level restriction. Track "active interactive ancestor" in parser state.
+`body` is the universal flow container — see "Flow Containers" below for the full breakdown.
 
 ---
 
-### 5. List Containers (G) as Parent
+### Flow Containers (shared rules)
 
-#### 5.1 `ul`/`ol`/`menu` → `li`
+**Elements:** `body`, `div`, `article`, `section`, `nav`, `aside`, `main`, `search`, `blockquote`, `dialog`, `figcaption`, `figure`, `dd`, `noscript`
 
-- **Valid:** Yes (this is the only valid child element)
-- **Chrome/Firefox:** `<li>` renders as `display: list-item`, which creates a principal block box plus a marker box (bullet/number). Marker is positioned per `list-style-position` (inside or outside).
-- **Pairwise note:** Context transition: `block → list-item`. The child context needs `list-style-type` and `list-style-position` from inherited properties. Marker box generation is child-side logic.
+**Content model:** Flow content (block + inline + everything)
+**Insertion mode:** InBody
 
-#### 5.2 `ul`/`ol` → **INVALID: Non-`li` Children**
+These all share identical pair rules:
 
-- `ul > div`, `ol > p`, `ul > span`
-- **Valid:** No
-- **Chrome/Firefox:** **Parser auto-generates an anonymous `<li>` wrapper.** The non-`li` content is placed inside an implicit `<li>`. In practice, Chrome wraps orphaned content in the list into an anonymous box. Firefox behaves similarly.
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | **Block elements:** `div`, `article`, `section`, `nav`, `aside`, `main`, `search`, `blockquote`, `dialog`, `figure`, `figcaption`, `details`, `summary`, `address`, `hgroup`, `header`, `footer` | Block box, normal flow. Margins collapse with parent/siblings unless parent establishes BFC. |
+| ACCEPT | **Headings:** `h1`, `h2`, `h3`, `h4`, `h5`, `h6` | Block box with UA font-size/weight/margins. |
+| ACCEPT | **Paragraphs:** `p`, `pre` | Block box. `p` has 1em vertical margins. `pre` preserves whitespace (`white-space: pre`). |
+| ACCEPT | **Lists:** `ul`, `ol`, `menu`, `dl` | Block box with UA `padding-inline-start: 40px`. |
+| ACCEPT | **Table:** `table` | `display: table`. Establishes table formatting context. Block-level wrapper box. |
+| ACCEPT | **Form:** `form`, `fieldset` | Block boxes. `fieldset` establishes new BFC with special border/legend rendering. `form` does not establish BFC. |
+| ACCEPT | **Inline/phrasing:** `span`, `em`, `strong`, `b`, `i`, `u`, `s`, `small`, `cite`, `code`, `var`, `samp`, `kbd`, `sub`, `sup`, `abbr`, `bdi`, `bdo`, `data`, `dfn`, `mark`, `q`, `time`, `output`, `ruby`, `rt`, `rp` | Inline box. Creates anonymous inline formatting context. If siblings are blocks, anonymous block boxes wrap consecutive inline runs. |
+| ACCEPT | **Interactive inline:** `a`, `button`, `label` | `a` is inline (transparent content model). `button` is `inline-block` establishing BFC. `label` is inline. |
+| ACCEPT | **Embedded/replaced:** `img`, `iframe`, `embed`, `object`, `video`, `audio`, `canvas`, `picture`, `svg`, `math`, `portal` | Inline-level replaced elements. Have intrinsic dimensions. `svg`/`math` establish foreign formatting contexts. |
+| ACCEPT | **Form controls:** `input`, `select`, `textarea`, `meter`, `progress`, `datalist` | Replaced/inline-block elements. Platform-native rendering for `input`, `select`, `textarea`. |
+| ACCEPT | **Transparent:** `ins`, `del`, `map`, `slot` | Inherit flow content model. Children processed as if in flow context. |
+| ACCEPT | **Text-level:** `br`, `wbr` | `br` forces line break. `wbr` provides optional break point. |
+| ACCEPT | **Separators:** `hr` | Block-level box with UA border. |
+| ACCEPT | **Hidden:** `script`, `style`, `template`, `noscript` | No layout boxes generated. Content is raw text (script/style) or inert (template). |
+| ACCEPT | **Definition parts as orphans:** `dt`, `dd`, `li` | Technically invalid outside their list parents, but Chrome/Firefox accept them in flow context as block boxes. `li` renders as `list-item`, `dt`/`dd` as blocks. |
+| DROP | `html`, `head` | Ignored. These structural tags can't appear mid-body. |
+| ACCEPT | `caption`, `colgroup`, `col`, `thead`, `tbody`, `tfoot`, `tr`, `td`, `th` | These are accepted by the parser in InBody mode but only make sense in table context. Chrome/Firefox render them as block or inline depending on UA stylesheet. They don't get table layout unless inside `<table>`. |
 
-  `<ul><div>text</div></ul>` → Chrome treats the `<div>` as if inside an anonymous `<li>`.
-
-- **Pairwise note:** Parser error recovery. Engine should auto-wrap non-`li` children.
-
-#### 5.3 `dl` → `dt`/`dd`
-
-- **Valid:** Yes
-- **Chrome/Firefox:** `<dt>` renders as block (no indentation). `<dd>` renders as block with `margin-inline-start: 40px`. They stack vertically in normal flow.
-- **Pairwise note:** Standard block-in-block. UA stylesheet provides the indentation.
-
-#### 5.4 `li` → Flow Content
-
-- `li > div`, `li > p`, `li > ul` (nested list), `li > table`
-- **Valid:** Yes (li accepts flow)
-- **Chrome/Firefox:** Normal flow layout inside the list item. Nested lists (`li > ul`) get special UA styling: nested lists have `margin-block: 0` (no extra vertical spacing), and `list-style-type` changes by nesting depth (disc → circle → square for `<ul>`).
-- **Pairwise note:** Li is a flow container. Nested list styling is UA stylesheet, not layout algorithm. Nesting depth affects `list-style-type` — this can be tracked in inherited properties.
+**Pair rule reduction:** All flow containers share ONE rule set. A single `FLOW_PARENT` rule covers `body`, `div`, `article`, `section`, `nav`, `aside`, `main`, `search`, `blockquote`, `dialog`, `figcaption`, `figure`, `dd`, and `noscript`.
 
 ---
 
-### 6. Table Containers (H) as Parent
+### Flow Containers (restricted variants)
 
-Table layout has the strictest nesting rules in HTML. The table model requires a specific hierarchy.
+These are flow containers with specific exclusions:
 
-#### 6.1 Required Table Hierarchy
+#### `header`, `footer`
 
+Same as Flow Containers above, **except:**
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| DROP (spec) | `header`, `footer` (as descendants) | Spec forbids `header`/`footer` nesting, but Chrome/Firefox do NOT enforce this at the parser level. They accept it and render normally. **Spec violation tolerated.** |
+
+**Pair rule:** Same as `FLOW_PARENT`. No parser-level difference.
+
+#### `address`
+
+Same as Flow Containers, **except:**
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| DROP (spec) | `address`, headings, sectioning elements | Spec forbids these as descendants. Chrome/Firefox do NOT enforce this — they accept and render. |
+
+**Pair rule:** Same as `FLOW_PARENT`. No parser-level difference.
+
+#### `dt`, `th`
+
+Same as Flow Containers, **except:**
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| DROP (spec) | `header`, `footer`, sectioning, heading elements | Spec forbids in `dt` and `th`. Not parser-enforced. |
+
+**Pair rule:** Same as `FLOW_PARENT`. No parser-level difference.
+
+#### `form`
+
+Same as Flow Containers, **except:**
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| DROP | `form` (nested) | **Parser enforced.** Inner `<form>` tag is completely ignored. Its children are adopted by the outer form's parent. The `</form>` close tag is also ignored (doesn't close the outer form). |
+
+**Pair rule:** `FLOW_PARENT` + special rule: `form → form = DROP`.
+
+#### `caption`
+
+Same as Flow Containers, **except:**
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| CLOSE_PARENT | `caption`, `colgroup`, `col`, `thead`, `tbody`, `tfoot`, `tr`, `td`, `th` | Any table-structure tag inside `<caption>` implicitly closes the caption and is processed in the table context. |
+
+**Pair rule:** `FLOW_PARENT` + `caption → table_structure_tag = CLOSE_PARENT`.
+
+---
+
+### `li`
+
+**Content model:** Flow content
+**Special behavior:** `li` inside `ul`/`ol` auto-closes a preceding open `li`.
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| (all) | (same as Flow Containers) | `li` is a flow container. Identical child handling to `div`. |
+| CLOSE_REOPEN | `li` (sibling) | When `<li>` is encountered and there's already an open `<li>` in scope, the open `<li>` is closed first. This is NOT a parent→child rule — it's a sibling rule. |
+
+**Pair rule:** `FLOW_PARENT`. The `li`→`li` close is a **scope rule**, not a nesting rule.
+
+---
+
+### `p`
+
+**Content model:** Phrasing content only
+**Insertion mode:** InBody (with auto-close rules)
+
+This is the most important element for parser pair rules because of its extensive auto-close list.
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | `span`, `em`, `strong`, `b`, `i`, `u`, `s`, `small`, `cite`, `code`, `var`, `samp`, `kbd`, `sub`, `sup`, `abbr`, `bdi`, `bdo`, `data`, `dfn`, `mark`, `q`, `time`, `output`, `ruby`, `rt`, `rp`, `label` | Phrasing content. Inline boxes in the paragraph's inline formatting context. |
+| ACCEPT | `a`, `ins`, `del`, `map` | Transparent elements inheriting phrasing model. Can contain only phrasing. |
+| ACCEPT | `img`, `br`, `wbr`, `input`, `select`, `textarea`, `button`, `meter`, `progress`, `embed`, `iframe`, `object`, `video`, `audio`, `canvas`, `picture`, `svg`, `math`, `portal` | Inline-level replaced/embedded elements. |
+| ACCEPT | `script`, `style`, `template`, `noscript`, `slot`, `datalist` | Hidden/inert/transparent. No layout impact. |
+| CLOSE_PARENT | `address` | `</p>` auto-generated, `<address>` becomes sibling. |
+| CLOSE_PARENT | `article` | `</p>` auto-generated, `<article>` becomes sibling. |
+| CLOSE_PARENT | `aside` | `</p>` auto-generated. |
+| CLOSE_PARENT | `blockquote` | `</p>` auto-generated. |
+| CLOSE_PARENT | `details` | `</p>` auto-generated. |
+| CLOSE_PARENT | `dialog` | `</p>` auto-generated. |
+| CLOSE_PARENT | `div` | `</p>` auto-generated. |
+| CLOSE_PARENT | `dl` | `</p>` auto-generated. |
+| CLOSE_PARENT | `fieldset` | `</p>` auto-generated. |
+| CLOSE_PARENT | `figcaption` | `</p>` auto-generated. |
+| CLOSE_PARENT | `figure` | `</p>` auto-generated. |
+| CLOSE_PARENT | `footer` | `</p>` auto-generated. |
+| CLOSE_PARENT | `form` | `</p>` auto-generated. |
+| CLOSE_PARENT | `h1`, `h2`, `h3`, `h4`, `h5`, `h6` | `</p>` auto-generated. |
+| CLOSE_PARENT | `header` | `</p>` auto-generated. |
+| CLOSE_PARENT | `hgroup` | `</p>` auto-generated. |
+| CLOSE_PARENT | `hr` | `</p>` auto-generated. `<hr>` becomes sibling block. |
+| CLOSE_PARENT | `li` | `</p>` auto-generated (only if `li` has `p` in button scope). |
+| CLOSE_PARENT | `main` | `</p>` auto-generated. |
+| CLOSE_PARENT | `menu` | `</p>` auto-generated. |
+| CLOSE_PARENT | `nav` | `</p>` auto-generated. |
+| CLOSE_PARENT | `ol` | `</p>` auto-generated. |
+| CLOSE_PARENT | `p` | `</p>` auto-generated. A new `<p>` opens immediately after. |
+| CLOSE_PARENT | `pre` | `</p>` auto-generated. |
+| CLOSE_PARENT | `search` | `</p>` auto-generated. |
+| CLOSE_PARENT | `section` | `</p>` auto-generated. |
+| CLOSE_PARENT | `summary` | `</p>` auto-generated. |
+| CLOSE_PARENT | `table` | `</p>` auto-generated. |
+| CLOSE_PARENT | `ul` | `</p>` auto-generated. |
+
+**The p-closing set (39 elements):**
 ```
-table
-├── caption           (optional, first child)
-├── colgroup          (optional)
-│   └── col
-├── thead             (optional)
-│   └── tr
-│       ├── th
-│       └── td
-├── tbody             (one or more, auto-generated if missing)
-│   └── tr
-│       ├── th
-│       └── td
-└── tfoot             (optional)
-    └── tr
-        ├── th
-        └── td
+address, article, aside, blockquote, details, dialog, div, dl, fieldset,
+figcaption, figure, footer, form, h1, h2, h3, h4, h5, h6, header, hgroup,
+hr, li, main, menu, nav, ol, p, pre, search, section, summary, table, ul
 ```
 
-#### 6.2 `table` → `caption`
-
-- **Valid:** Yes (as first child)
-- **Chrome/Firefox:** Caption renders as `display: table-caption`, positioned above or below the table per `caption-side`. Caption establishes a block formatting context for its contents.
-- **Pairwise note:** Context transition: `table → table-caption`. Containing block width is the table's border box width.
-
-#### 6.3 `table` → `thead`/`tbody`/`tfoot`
-
-- **Valid:** Yes
-- **Chrome/Firefox:** Row groups render as `display: table-*-group`. They don't generate visible boxes themselves — they group rows. `border-collapse: collapse` changes border rendering between groups.
-- **Pairwise note:** Context stays in table. Row groups are structural groupings.
-
-#### 6.4 `table` → **Missing `tbody`**
-
-- `<table><tr>...</tr></table>` (no explicit tbody)
-- **Valid:** Yes (implied)
-- **Chrome/Firefox:** **Parser auto-inserts `<tbody>`.** All `<tr>` elements not inside `thead`/`tfoot` are wrapped in an anonymous `<tbody>`.
-- **Pairwise note:** Parser-level. Always normalize to the full table hierarchy.
-
-#### 6.5 `tr` → `td`/`th`
-
-- **Valid:** Yes (only valid children)
-- **Chrome/Firefox:** Cells render as `display: table-cell`. Each cell **establishes a new block formatting context** (CSS 2.1 §17.5.4). Cells size according to the table layout algorithm (fixed or automatic). `colspan`/`rowspan` attributes create spanning cells.
-- **Pairwise note:** **Major context transition: table-row → table-cell (new BFC).** The cell's containing block dimensions come from the table layout algorithm, not from parent width propagation. This is one of the most complex transitions.
-
-#### 6.6 `td`/`th` → Flow Content
-
-- `td > div`, `td > p`, `td > table` (nested table)
-- **Valid:** Yes (cells accept flow)
-- **Chrome/Firefox:** Normal flow layout inside the cell's new BFC. Nested tables are fully supported — the inner table gets its own table formatting context. Percentage widths on children resolve against the cell's computed width.
-- **Pairwise note:** Cell is a flow container with a new BFC. Context transition back to block formatting. Containing block is the cell's content area.
-
-#### 6.7 `table` → **INVALID: Direct text or non-table elements**
-
-- `<table>some text</table>`, `<table><div>x</div></table>`
-- **Valid:** No
-- **Chrome/Firefox:** **Table foster parenting.** Text and non-table elements that appear directly in `table`, `thead`, `tbody`, `tfoot`, or `tr` are "foster parented" — moved BEFORE the table in the DOM. This is defined in the HTML parsing spec §13.2.6.1.
-
-  `<table><div>x</div><tr><td>y</td></tr></table>` renders as:
-  `<div>x</div> <table><tbody><tr><td>y</td></tr></tbody></table>`
-
-- **Pairwise note:** **Critical parser rule.** Foster parenting is one of the most counterintuitive behaviors. The engine parser must implement foster parenting for all non-table content found in table contexts.
-
-#### 6.8 Table Cells → **Invalid in wrong table position**
-
-- `<table><td>...</td></table>` (td without tr)
-- **Valid:** No (implied)
-- **Chrome/Firefox:** **Parser auto-generates `<tbody>` and `<tr>`.** The cell is wrapped: `<table><tbody><tr><td>...</td></tr></tbody></table>`.
-- **Pairwise note:** Parser auto-generation. Normalize table structure.
+**Pair rule:** `p → [p-closing-set] = CLOSE_PARENT`. Single rule with a set lookup.
 
 ---
 
-### 7. Form Element Nesting
+### `h1`, `h2`, `h3`, `h4`, `h5`, `h6`
 
-#### 7.1 `form` → Flow Content
+**Content model:** Phrasing content only
+**Same ACCEPT set as `p`.**
 
-- `form > div`, `form > p`, `form > input`, `form > fieldset`
-- **Valid:** Yes (form accepts flow)
-- **Chrome/Firefox:** Normal flow layout. `<form>` is a block-level container. It does not establish a new BFC (unlike `fieldset`).
-- **Pairwise note:** `form` is a standard flow container. No special layout behavior.
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | (same phrasing set as `p`) | Identical to `p` — inline formatting context. |
+| CLOSE_PARENT | (same p-closing set as `p`) | Headings auto-close on the same set of block elements. |
+| CLOSE_PARENT | `h1`, `h2`, `h3`, `h4`, `h5`, `h6` | **Any heading closes any open heading.** `<h1>foo <h2>bar` → `<h1>foo</h1><h2>bar</h2>`. All six close each other. |
 
-#### 7.2 `fieldset` → `legend` (first child) + Flow
-
-- **Valid:** Yes
-- **Chrome/Firefox:** `<legend>` renders as a special block that overlaps the fieldset's border. The legend box is positioned at the block-start edge of the fieldset, with the fieldset's border going around/behind it. Content after `legend` flows in the fieldset's content area.
-- **Pairwise note:** Fieldset establishes a new BFC. Legend has special positioning rules — it's not normal flow. This is a unique pairwise transition that requires fieldset-specific layout logic.
-
-#### 7.3 `button` → Phrasing Content
-
-- `button > span`, `button > img`, `button > em`
-- **Valid:** Yes (phrasing, no interactive descendants)
-- **Chrome/Firefox:** Button establishes a new BFC for its contents. Children are centered (per UA stylesheet). Button is a replaced-like element with special sizing.
-- **Pairwise note:** Context transition: `inline-block` parent with new BFC. Children lay out in block flow inside the button's content area.
-
-#### 7.4 `select` → `option`/`optgroup`
-
-- **Valid:** Yes (only valid children)
-- **Chrome/Firefox:** Select is a replaced element — its rendering is platform-native (OS dropdown). `<option>` elements are not laid out by CSS — they appear in the dropdown menu. `<optgroup>` creates a labeled group in the dropdown.
-- **Pairwise note:** **No CSS layout applies.** Select/option rendering is platform-native. The engine must handle these as replaced elements with special UI, not via the pairwise layout engine.
-
-#### 7.5 `label` → Phrasing (no nested label)
-
-- `label > span`, `label > input`
-- **Valid:** Yes
-- **Chrome/Firefox:** Normal inline layout. `<label>` renders as inline. Clicking the label focuses its associated control. Nested `<label>` is invalid — Chrome ignores the inner label tag.
-- **Pairwise note:** Standard inline container. No layout-level difference from `<span>`.
+**Pair rule:** Same as `p` + additional rule: `heading → heading = CLOSE_PARENT`.
 
 ---
 
-### 8. Media Container Nesting
+### `pre`
 
-#### 8.1 `video`/`audio` → `source`, `track`, then Transparent
+**Content model:** Phrasing content only
+**Same ACCEPT and CLOSE_PARENT sets as `p`.**
 
-- `video > source`, `video > track`, `video > div` (fallback)
-- **Valid:** Yes
-- **Chrome/Firefox:** `<source>` and `<track>` are void/hidden. Transparent fallback content is rendered only if the media element is unsupported. When the media renders, fallback content is hidden.
-- **Pairwise note:** Media elements are replaced. If supported, children are invisible. If unsupported, transparent content model applies (inherits parent's model).
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | (same phrasing set as `p`) | Identical to `p`. Additionally: `white-space: pre` is inherited, so text preserves whitespace. |
+| CLOSE_PARENT | (same p-closing set as `p`) | Identical auto-close behavior. |
 
-#### 8.2 `picture` → `source` + `img`
+**Special:** First newline character after `<pre>` is stripped (parser rule, not layout).
 
-- **Valid:** Yes
-- **Chrome/Firefox:** `<source>` elements provide responsive image candidates. The `<img>` is the actual rendered element. Picture itself generates no box — it's a wrapper for responsive image selection.
-- **Pairwise note:** `picture` is effectively transparent for layout. The `img` inside it is what generates the box.
-
----
-
-### 9. Special Container Nesting
-
-#### 9.1 `html` → `head` + `body`
-
-- **Valid:** Yes (only valid structure)
-- **Chrome/Firefox:** `<html>` is the root element. `<head>` is `display: none`. `<body>` establishes the initial containing block with 8px UA margin. All visible content is in `<body>`.
-- **Pairwise note:** Root context. The initial containing block dimensions come from the viewport.
-
-#### 9.2 `details` → `summary` (first child) + Flow
-
-- **Valid:** Yes
-- **Chrome/Firefox:** `<summary>` renders as `display: list-item` with a disclosure triangle marker. When `details` lacks the `open` attribute, only `<summary>` is visible — all other children are hidden (`display: none` equivalent, but actually content-visibility based in modern browsers). When `open`, all children render in normal flow after the summary.
-- **Pairwise note:** Details is a flow container. The `open` attribute controls visibility of non-summary children. Summary has special marker rendering (disclosure triangle).
-
-#### 9.3 `ruby` → Text + `rt` + `rp`
-
-- **Valid:** Yes
-- **Chrome/Firefox:** Ruby base text renders inline. `<rt>` renders as `display: ruby-text` — small annotation text positioned above (or beside) the base. `<rp>` content is hidden (provides fallback parentheses for non-ruby-aware agents).
-- **Pairwise note:** Context transition to **ruby formatting context.** Ruby has its own layout algorithm. The context must switch to ruby mode.
-
-#### 9.4 `svg` → SVG Elements
-
-- `svg > rect`, `svg > circle`, `svg > path`, `svg > g`, `svg > text`
-- **Valid:** Yes (SVG namespace)
-- **Chrome/Firefox:** Entirely different layout model. SVG uses a coordinate-based system, not CSS box model. Elements are positioned by `x`/`y`/`cx`/`cy` attributes. CSS properties like `fill`, `stroke` apply. `transform` uses SVG transform syntax.
-- **Pairwise note:** **Major context transition: CSS → SVG formatting context.** This is a completely different layout algorithm. The pairwise context must carry SVG-specific state (viewBox, coordinate system, current transform).
-
-#### 9.5 `math` → MathML Elements
-
-- `math > mrow`, `math > mfrac`, `math > msup`
-- **Valid:** Yes (MathML namespace)
-- **Chrome/Firefox:** MathML has its own layout algorithm for mathematical notation. Chrome and Firefox both support MathML Core (Chrome since 109, Firefox much earlier).
-- **Pairwise note:** **Major context transition: CSS → MathML formatting context.** Like SVG, this is a completely separate layout system.
-
-#### 9.6 `iframe` → (nested browsing context)
-
-- **Valid:** Content is ignored
-- **Chrome/Firefox:** iframe is a replaced element (300×150 default). It creates a **nested browsing context** with its own document. No parent-child layout interaction — the iframe's content is independent.
-- **Pairwise note:** Replaced element with fixed/specified dimensions. No layout interaction with iframe contents.
+**Pair rule:** Identical to `p`. The `white-space: pre` is a CSS inherited property, not a pair rule.
 
 ---
 
-### 10. Cross-Category Problematic Pairs
+### Inline Phrasing Containers (shared rules)
 
-These are the pairs where Chrome/Firefox behavior is complex or counterintuitive.
+**Elements:** `span`, `em`, `strong`, `b`, `i`, `u`, `s`, `small`, `cite`, `code`, `var`, `samp`, `kbd`, `sub`, `sup`, `abbr`, `bdi`, `bdo`, `data`, `dfn`, `mark`, `q`, `time`, `output`
 
-#### 10.1 Block inside Inline (the "anonymous block" problem)
+**Content model:** Phrasing content
+**Insertion mode:** InBody (no special mode change)
 
-- `span > div`, `em > blockquote`, `a > div` (when a is in inline context)
-- **Browser behavior:** Inline element is split. Anonymous block boxes are generated around the inline fragments. The block child interrupts the inline flow.
-- **Engine complexity:** HIGH. This requires:
-  1. Breaking the inline box at the block child boundary
-  2. Generating anonymous block boxes for the pre-block and post-block inline content
-  3. Maintaining inline formatting state (decorations, etc.) across the split
-- **Pairwise note:** This is the #1 most complex pairwise interaction for layout.
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | (all phrasing elements — same set as `p` ACCEPT list) | Inline children nest inside the inline box. Inherited properties cascade (font-style, font-weight, color, text-decoration). |
+| ACCEPT (parser) | **Block elements** (`div`, `p`, `table`, etc.) | **Parser does NOT auto-close inline elements.** The block is accepted as a child in the DOM tree. Layout then performs **anonymous block box generation** — the inline is split around the block. |
 
-#### 10.2 Table foster parenting
+**This is the critical difference from `p`:** inline elements do NOT auto-close. They accept block children at the parser level, and layout handles the split.
 
-- `table > div`, `table > "text"`, `tr > span`
-- **Browser behavior:** Non-table content is moved before the table (foster parenting).
-- **Engine complexity:** MEDIUM. Parser must detect table context and reparent nodes.
-- **Pairwise note:** Parser-level only. No layout complexity once the DOM is correct.
+**Layout behavior for invalid block-in-inline:**
 
-#### 10.3 `<p>` auto-closing cascade
+```html
+<span>AAA <div>BBB</div> CCC</span>
+```
 
-- `p > div`, `p > p`, `p > ul`, `p > table`
-- **Browser behavior:** Parser closes `<p>`, inserts block element as sibling.
-- **Engine complexity:** LOW (parser rule). But interacts with transparent elements: `<p><a><div>` triggers complex reconstruction.
-- **Pairwise note:** Maintain a list of elements that close `<p>`. Handle interaction with active formatting elements (like `<a>`, `<b>`, etc. that are reconstructed across the boundary).
+Chrome/Firefox render this as:
 
-#### 10.4 Formatting element reconstruction
+```
+[anonymous block] → [inline: <span>AAA </span>]
+[block: <div>BBB</div>]
+[anonymous block] → [inline: <span> CCC</span>]
+```
 
-- `<p><b>Hello <div>World</div></b></p>`
-- **Browser behavior:** `<b>` is an active formatting element. When `<p>` auto-closes at `<div>`, the parser reconstructs `<b>` inside the new context:
-  Result: `<p><b>Hello </b></p><div><b>World</b></div>`
-- **Engine complexity:** MEDIUM. Parser must maintain an active formatting element list and reconstruct them when the tree is split.
-- **Pairwise note:** Parser-level. The "adoption agency algorithm" (HTML spec §13.2.6.4.7) handles this.
+The `<span>` is split into two fragments. CSS properties (background, border, text-decoration) are carried across both fragments. `text-decoration` notably continues visually across the split (it "paints through").
 
-#### 10.5 `display: flex`/`display: grid` on any element
+**Pair rule:** `INLINE_PHRASING_PARENT → any = ACCEPT (parser)`. Layout handles splits via anonymous block generation. This is ONE rule.
 
-- Any element with `display: flex` or `display: grid` applied via CSS
-- **Browser behavior:** Establishes a new formatting context. All children become flex/grid items. Anonymous flex/grid items are generated for text nodes. Some child properties change meaning (float is ignored on flex items, vertical-align is ignored on flex items, etc.).
-- **Engine complexity:** HIGH. Flex and grid have their own layout algorithms.
-- **Pairwise note:** This is a **CSS-driven context transition**, not an HTML nesting one. The pairwise transition function must check `display` computed value to determine the formatting context, not just the element tag.
-
-#### 10.6 `position: absolute`/`fixed` on any child
-
-- Any child with `position: absolute` or `position: fixed`
-- **Browser behavior:** Child is taken out of normal flow. Its containing block is the nearest positioned ancestor (for absolute) or the viewport (for fixed, unless an ancestor has transform/filter/will-change). The child does not affect the parent's size.
-- **Engine complexity:** MEDIUM. Requires containing block resolution up the tree.
-- **Pairwise note:** The pairwise context carries `positioned_containing_block` and `fixed_containing_block` fields. Out-of-flow children are laid out after in-flow children.
+**Special restrictions (spec-level, NOT parser-enforced):**
+- `dfn` cannot contain `dfn` descendants
+- `label` cannot contain `label` descendants
+- These are not enforced by Chrome/Firefox parsers.
 
 ---
 
-## Summary Statistics
+### `label`
 
-| Category | Valid Pairs (approx) | Notes |
-|---|---|---|
-| Flow → Any Child | ~2,800 | Most permissive; standard block/inline flow |
-| Phrasing → Phrasing | ~800 | Inline formatting; no context change |
-| Phrasing-Block → Invalid Block | ~300 | Auto-close in parser; no layout handling |
-| Inline → Invalid Block | ~300 | Anonymous block generation; complex layout |
-| Table Hierarchy | ~50 | Strict structure; auto-generation + foster parenting |
-| List → li only | ~10 | Auto-wrap non-li children |
-| Select/Option | ~10 | Platform-native rendering; no CSS layout |
-| Transparent delegation | ~500 | Inherits parent behavior; pass-through |
-| Media containers | ~30 | Replaced elements; fallback content |
-| SVG/MathML children | (separate spec) | Different layout algorithm entirely |
-| **Total meaningful pairs** | **~4,900** | |
+Same as Inline Phrasing Containers, **except:**
 
-### Pairs Requiring Special Engine Handling
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| DROP (spec) | `label` (nested) | Spec forbids. Chrome/Firefox do NOT enforce at parser level — they accept nested labels. |
 
-1. **Block in inline** — anonymous block generation (~300 pairs)
-2. **Table foster parenting** — parser reparenting (~100 pairs)
-3. **`<p>` auto-close** — parser closes p on block element (~200 pairs)
-4. **Formatting element reconstruction** — adoption agency algorithm (~200 pairs)
-5. **Table auto-generation** — missing tbody/tr/td insertion (~50 pairs)
-6. **Fieldset + legend** — special legend positioning (1 pair)
-7. **Ruby layout** — ruby formatting context (~10 pairs)
-8. **SVG context switch** — CSS → SVG layout (~50+ pairs, separate spec)
-9. **MathML context switch** — CSS → MathML layout (~30+ pairs, separate spec)
-10. **CSS-driven context changes** — flex, grid, float, position (~all pairs, property-dependent)
+**Pair rule:** Same as `INLINE_PHRASING_PARENT`.
+
+---
+
+### `a` (anchor)
+
+**Content model:** Transparent (inherits from parent)
+**Insertion mode:** InBody
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | (whatever the parent's content model allows) | If `<a>` is in a flow container, it can contain flow elements. If in a phrasing container, phrasing only. |
+| DROP | `a` (nested) | **Parser enforced.** Adoption agency algorithm runs: the outer `<a>` is closed at the point where the inner `<a>` starts. Inner `<a>` opens. This prevents true nesting. |
+| DROP (spec) | `button`, `details`, `embed`, `iframe`, `label`, `select`, `textarea` | Interactive content forbidden inside `<a>`. Chrome/Firefox behavior varies: some are parser-enforced (inner `<a>`), others are spec-only. |
+
+**Pair rule:** `TRANSPARENT_PARENT` (inherits parent's rule set) + `a → a = DROP (adoption agency)`.
+
+---
+
+### `ins`, `del`
+
+**Content model:** Transparent
+**Same as `a`** except no interactive content restriction.
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | (whatever the parent's content model allows) | Transparent — inherits parent. |
+
+**Pair rule:** `TRANSPARENT_PARENT`.
+
+---
+
+### `map`, `slot`
+
+**Content model:** Transparent
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | (whatever the parent's content model allows) | Transparent — inherits parent. |
+
+**Pair rule:** `TRANSPARENT_PARENT`.
+
+---
+
+### `canvas`, `object`
+
+**Content model:** Transparent (fallback content)
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | (whatever the parent's content model allows) | Content is fallback. If the element renders (canvas context available, object loaded), children are not displayed. If not, children render per parent's content model. |
+
+**Pair rule:** `TRANSPARENT_PARENT`. Display depends on element state.
+
+---
+
+### `button`
+
+**Content model:** Phrasing content (no interactive descendants)
+**Establishes:** New BFC (inline-block)
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | (phrasing elements — same as `p` ACCEPT list) | Inline content inside button's BFC. |
+| CLOSE_REOPEN | `button` (nested) | **Parser enforced.** Encountering `<button>` when a `<button>` is already open closes the first button. Like `li`→`li`. |
+| DROP (spec) | `a`, `button`, `details`, `embed`, `iframe`, `label`, `select`, `textarea` | Interactive content forbidden. `button`→`button` is parser-enforced (close-reopen). Others are spec-only. |
+| ACCEPT (parser) | Block elements | Parser accepts them (like inline elements do). Layout generates anonymous blocks inside the button's BFC. |
+
+**Pair rule:** `PHRASING_PARENT` + `button → button = CLOSE_REOPEN`.
+
+---
+
+### `ul`, `ol`, `menu`
+
+**Content model:** `li` only (+ `script`, `template`)
+**Insertion mode:** InBody
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | `li` | Valid child. `li` renders as `display: list-item`. |
+| ACCEPT | `script`, `template` | Valid. Hidden/inert. |
+| CLOSE_REOPEN (li) | `li` (when prev `li` is open) | New `<li>` closes the previous `<li>`. Sibling rule. |
+| ACCEPT (parser) | Any other element | **Parser does NOT reject non-li children.** Chrome/Firefox accept `<ul><div>x</div></ul>` — the `div` becomes a direct child of `ul`. Layout renders it as a block box without list-item styling (no marker). |
+
+**Pair rule:** `LIST_PARENT → li = ACCEPT`, `LIST_PARENT → other = ACCEPT (parser, invalid but tolerated)`. Chrome/Firefox are lenient here.
+
+---
+
+### `dl`
+
+**Content model:** `dt`/`dd` groups (or `div` wrapping dt/dd groups)
+**Insertion mode:** InBody
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | `dt`, `dd`, `div` | Valid children. `dt` is block, `dd` is block with `margin-inline-start: 40px`. `div` can wrap dt/dd groups. |
+| ACCEPT | `script`, `template` | Valid. Hidden/inert. |
+| CLOSE_REOPEN | `dt` when `dt` is open | New `<dt>` closes previous `<dt>`. |
+| CLOSE_REOPEN | `dd` when `dt` is open | `<dd>` closes preceding `<dt>`. |
+| CLOSE_REOPEN | `dt` when `dd` is open | `<dt>` closes preceding `<dd>`. |
+| CLOSE_REOPEN | `dd` when `dd` is open | `<dd>` closes preceding `<dd>`. |
+| ACCEPT (parser) | Any other element | Tolerated. Rendered per its default display. |
+
+**Pair rule:** `DL_PARENT → dt/dd = ACCEPT + CLOSE_REOPEN (prev dt/dd)`. Cross-closing between dt↔dd.
+
+---
+
+### `table`
+
+**Content model:** `caption`, `colgroup`, `thead`, `tbody`, `tfoot`, `tr` (in order)
+**Insertion mode:** InTable
+
+This is where pair rules get complex. The parser switches to InTable mode.
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | `caption` | Valid. Switches to InCaption mode. |
+| ACCEPT | `colgroup` | Valid. Switches to InColumnGroup mode. |
+| ACCEPT | `col` | WRAP(colgroup). Auto-generates `<colgroup>` wrapper. |
+| ACCEPT | `thead`, `tfoot` | Valid. Switches to InTableBody mode. |
+| ACCEPT | `tbody` | Valid. Switches to InTableBody mode. |
+| WRAP(tbody) | `tr` | If `<tr>` appears directly in `<table>`, parser auto-generates `<tbody>` and inserts `<tr>` inside it. |
+| WRAP(tbody, tr) | `td`, `th` | If cell appears directly in `<table>`, parser auto-generates `<tbody><tr>` and inserts cell inside. |
+| ACCEPT | `script`, `template`, `style` | Valid in InTable mode. Processed normally. |
+| FOSTER | `div`, `p`, `span`, `a`, `img`, `input`, text, **all other elements** | **Foster parenting.** Non-table content is moved BEFORE the table in the DOM tree. Parser processes the element in InBody mode but inserts it before the table. |
+| DROP | `table` (nested via parser) | **Encountering `<table>` inside `<table>` closes the inner table context.** Actually, it closes the current table and starts a new one. Result: tables become siblings, not nested. **EXCEPT** if `<table>` appears inside `<td>`/`<th>` — then it's a legitimately nested table. |
+| ACCEPT | `form` | **DROP.** `<form>` is ignored inside table context (InTable mode). |
+
+**Foster parenting in detail:**
+
+```html
+<table>
+  <div>foster me</div>
+  <tr><td>cell</td></tr>
+</table>
+```
+
+DOM result:
+```
+<div>foster me</div>
+<table>
+  <tbody>
+    <tr><td>cell</td></tr>
+  </tbody>
+</table>
+```
+
+The `<div>` is foster-parented before the table.
+
+**Pair rule:** `TABLE_PARENT → [table-children] = ACCEPT/WRAP`. `TABLE_PARENT → [everything else] = FOSTER`.
+
+The table-children set: `caption`, `colgroup`, `col`, `thead`, `tbody`, `tfoot`, `tr`, `td`, `th`, `script`, `template`, `style`.
+
+---
+
+### `thead`, `tbody`, `tfoot`
+
+**Content model:** `tr` only (+ `script`, `template`)
+**Insertion mode:** InTableBody
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | `tr` | Valid. Switches to InRow mode. |
+| ACCEPT | `script`, `template` | Valid. |
+| WRAP(tr) | `td`, `th` | Auto-generates `<tr>` wrapper for orphaned cells. |
+| CLOSE_PARENT | `caption`, `colgroup`, `thead`, `tbody`, `tfoot` | These close the current row group. Parser returns to InTable mode. |
+| CLOSE_PARENT | `</table>` | Closes row group and table. |
+| FOSTER | Everything else | Same foster parenting as `table`. Non-table content moves before the table. |
+
+**Pair rule:** `TABLE_BODY_PARENT → tr = ACCEPT`, `→ td/th = WRAP(tr)`, `→ table-structure = CLOSE_PARENT`, `→ other = FOSTER`.
+
+---
+
+### `tr`
+
+**Content model:** `td`, `th` only (+ `script`, `template`)
+**Insertion mode:** InRow
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | `td`, `th` | Valid. Switches to InCell mode. Each cell establishes a new BFC. |
+| ACCEPT | `script`, `template` | Valid. |
+| CLOSE_PARENT | `tr` | New `<tr>` closes the current row. |
+| CLOSE_PARENT | `caption`, `colgroup`, `thead`, `tbody`, `tfoot` | Close row and return to table context. |
+| CLOSE_PARENT | `</table>` | Close row, row group, and table. |
+| FOSTER | Everything else | Foster parent before the table. |
+
+**Pair rule:** `TABLE_ROW_PARENT → td/th = ACCEPT`, `→ tr = CLOSE_PARENT`, `→ table-structure = CLOSE_PARENT`, `→ other = FOSTER`.
+
+---
+
+### `td`, `th` (table cells)
+
+**Content model:** Flow content
+**Insertion mode:** InCell (which delegates to InBody)
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| (all) | Same as Flow Containers | Cells are flow containers. They accept all InBody content. |
+| CLOSE_PARENT | `td`, `th` | New cell closes the current cell. |
+| CLOSE_PARENT | `tr`, `caption`, `colgroup`, `thead`, `tbody`, `tfoot` | Table structure tags close the cell. |
+| CLOSE_PARENT | `</table>` | Closes cell, row, row group, table. |
+
+**Pair rule:** `FLOW_PARENT` + `cell → cell = CLOSE_PARENT` + `cell → table-structure = CLOSE_PARENT`.
+
+---
+
+### `colgroup`
+
+**Content model:** `col` only (or empty with `span` attribute)
+**Insertion mode:** InColumnGroup
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | `col` | Valid. |
+| ACCEPT | `template` | Valid. |
+| CLOSE_PARENT | Everything else | Any non-`col` tag closes `<colgroup>`. Parser returns to InTable mode and reprocesses the tag. |
+
+**Pair rule:** `COLGROUP_PARENT → col/template = ACCEPT`, `→ other = CLOSE_PARENT`.
+
+---
+
+### `caption`
+
+See "Flow Containers (restricted variants)" above. Summary:
+
+**Pair rule:** `FLOW_PARENT` + `caption → table-structure = CLOSE_PARENT`.
+
+---
+
+### `select`
+
+**Content model:** `option`, `optgroup`, `hr`
+**Insertion mode:** InSelect
+
+The parser switches to a completely different mode.
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | `option` | Valid. Closes any previous open `<option>`. |
+| ACCEPT | `optgroup` | Valid. Closes any previous open `<optgroup>` (and its `<option>`). |
+| ACCEPT | `hr` | Valid (as a separator). Renders as a horizontal line in the dropdown. |
+| ACCEPT | `script`, `template` | Valid. |
+| CLOSE_PARENT | `select` (nested) | Closes the current `<select>`. |
+| CLOSE_PARENT | `input`, `textarea` | Close `<select>` and process in InBody mode. |
+| DROP | Everything else | **Ignored entirely.** `<div>`, `<p>`, `<span>`, text — all tags (not text content) are dropped in InSelect mode. Text IS accepted as content of options. |
+
+**Pair rule:** `SELECT_PARENT → option/optgroup/hr = ACCEPT`, `→ select/input/textarea = CLOSE_PARENT`, `→ other = DROP`.
+
+---
+
+### `optgroup`
+
+**Content model:** `option` only
+**Insertion mode:** InSelect
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | `option` | Valid. Closes any previous open `<option>`. |
+| CLOSE_PARENT | `optgroup` | New optgroup closes current one. |
+| CLOSE_PARENT | `select` (closing) | Closes optgroup and select. |
+| DROP | Everything else | Same as `select` — ignored in InSelect mode. |
+
+**Pair rule:** `OPTGROUP_PARENT → option = ACCEPT`, `→ optgroup = CLOSE_PARENT`, `→ other = DROP`.
+
+---
+
+### `option`
+
+**Content model:** Text only
+**Insertion mode:** InSelect
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| RAW_TEXT (effectively) | Text content | Only text is accepted. |
+| CLOSE_PARENT | `option` | New option closes current one. |
+| CLOSE_PARENT | `optgroup` | Closes option (and current optgroup opens new one). |
+| DROP | Everything else | Tags are dropped. Only text content is preserved. |
+
+**Pair rule:** `OPTION_PARENT → text = ACCEPT`, `→ option/optgroup = CLOSE_PARENT`, `→ other = DROP`.
+
+---
+
+### `textarea`
+
+**Content model:** Text only (RCDATA)
+**Insertion mode:** Text (RCDATA)
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| RAW_TEXT | Everything | Parser switches to RCDATA mode. No tags are parsed inside textarea (except `</textarea>`). All content is raw text. HTML entities ARE decoded. |
+
+**Pair rule:** `RAW_TEXT_PARENT`. No child elements possible.
+
+---
+
+### `title`
+
+**Content model:** Text only (RCDATA)
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| RAW_TEXT | Everything | Same as `textarea`. RCDATA mode — entities decoded, no tags parsed. |
+
+**Pair rule:** `RAW_TEXT_PARENT`.
+
+---
+
+### `script`
+
+**Content model:** Text only (raw text)
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| RAW_TEXT | Everything | Parser switches to Script Data mode. Nothing is parsed — even entities are NOT decoded. Only `</script>` ends it. |
+
+**Pair rule:** `RAW_TEXT_PARENT`.
+
+---
+
+### `style`
+
+**Content model:** Text only (raw text)
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| RAW_TEXT | Everything | Same as `script`. Raw text mode. Only `</style>` ends it. |
+
+**Pair rule:** `RAW_TEXT_PARENT`.
+
+---
+
+### `template`
+
+**Content model:** Anything (inert)
+**Special behavior:** Content is parsed into a DocumentFragment, not rendered.
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | Everything | Template can contain any HTML content. It's parsed normally but stored in an inert DocumentFragment. `display: none` — no layout boxes generated. |
+
+**Pair rule:** `TEMPLATE_PARENT → any = ACCEPT (inert)`. No layout implications.
+
+---
+
+### `noscript`
+
+**Content model:** Varies — when scripting is disabled, acts as flow/phrasing container; when enabled, raw text.
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| RAW_TEXT | (when scripting enabled) | Content is raw text — not parsed. |
+| ACCEPT | (when scripting disabled) | Content is parsed as flow content (if in `body`) or metadata (if in `head`). |
+
+**Pair rule:** Depends on scripting state. For Pane (scripting disabled): `FLOW_PARENT`.
+
+---
+
+### `ruby`
+
+**Content model:** Phrasing + `rt` + `rp`
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | Phrasing elements | Base text of the ruby annotation. |
+| ACCEPT | `rt` | Ruby text — annotation displayed above/beside base. `display: ruby-text`. |
+| ACCEPT | `rp` | Fallback parentheses — `display: none` in ruby-aware browsers. |
+| CLOSE_REOPEN | `rt` when `rt` is open | New `<rt>` closes previous `<rt>`. |
+| CLOSE_REOPEN | `rp` when `rt` is open | `<rp>` closes `<rt>`. |
+
+**Pair rule:** `RUBY_PARENT → phrasing = ACCEPT`, `→ rt/rp = ACCEPT + CLOSE_REOPEN(prev)`.
+
+---
+
+### `hgroup`
+
+**Content model:** `h1`–`h6` and `p` elements
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | `h1`, `h2`, `h3`, `h4`, `h5`, `h6` | Headings inside hgroup. Only one is the "heading" — others are subheadings. |
+| ACCEPT | `p` | Used for subtitles/taglines. |
+| ACCEPT | `script`, `template` | Valid. |
+| ACCEPT (parser) | Other elements | Parser does not enforce hgroup content model strictly. Other elements are accepted but invalid per spec. |
+
+**Pair rule:** `HGROUP_PARENT → headings/p = ACCEPT`, `→ other = ACCEPT (parser tolerant)`.
+
+---
+
+### `details`
+
+**Content model:** `summary` (first child) then flow
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | `summary` (as first child) | Summary is the visible toggle element. If no `<summary>` present, Chrome/Firefox auto-generate one with text "Details". |
+| ACCEPT | Flow content (after summary) | Only visible when `open` attribute is present. Hidden otherwise. |
+
+**Pair rule:** `FLOW_PARENT` with display-toggling for non-summary children based on `open` attribute.
+
+---
+
+### `summary`
+
+**Content model:** Phrasing content or one heading element
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | Phrasing elements | Normal inline content. |
+| ACCEPT | `h1`–`h6` (one) | Heading as the summary text. |
+| ACCEPT (parser) | Block elements | Parser accepts them. Layout renders normally (summary acts as a flow container in practice). |
+
+**Pair rule:** Effectively `FLOW_PARENT` (parser is lenient).
+
+---
+
+### `fieldset`
+
+**Content model:** `legend` (optional first child) then flow
+**Establishes:** New BFC
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | `legend` (first child) | Special positioning: legend overlaps the fieldset border at block-start edge. |
+| ACCEPT | Flow content | Normal flow after legend. Fieldset establishes BFC. |
+
+**Pair rule:** `FLOW_PARENT` + `fieldset → legend (first) = special positioning`.
+
+---
+
+### `legend`
+
+**Content model:** Phrasing content and heading content
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | Phrasing elements | Inline content. |
+| ACCEPT | `h1`–`h6` | Heading inside legend. |
+| ACCEPT (parser) | Block elements | Parser accepts. Layout treats legend as a flow container. |
+
+**Pair rule:** Effectively `FLOW_PARENT` (parser is lenient).
+
+---
+
+### `figure`
+
+**Content model:** `figcaption` (optional first or last child) then flow
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | `figcaption` | Caption for the figure. Block box. |
+| ACCEPT | Flow content | Normal flow layout. |
+
+**Pair rule:** `FLOW_PARENT`.
+
+---
+
+### `video`, `audio`
+
+**Content model:** `source`, `track`, then transparent (fallback)
+**Replaced elements**
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | `source` | Media source candidates. Not rendered. |
+| ACCEPT | `track` | Text tracks (subtitles). Not rendered visually in parent. |
+| ACCEPT | (transparent — fallback) | Only displayed if media fails to load. Inherits parent's content model. |
+
+**Pair rule:** `MEDIA_PARENT → source/track = ACCEPT (hidden)`, `→ other = TRANSPARENT_PARENT (fallback)`.
+
+---
+
+### `picture`
+
+**Content model:** `source` elements then one `img`
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | `source` | Responsive image candidates. Not rendered. |
+| ACCEPT | `img` | The actual rendered image. |
+
+**Pair rule:** `PICTURE_PARENT → source/img = ACCEPT`.
+
+---
+
+### `svg`
+
+**Content model:** SVG namespace elements
+**Insertion mode:** InForeignContent
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| FOREIGN | SVG elements (`rect`, `circle`, `path`, `g`, `text`, `defs`, `use`, `line`, `polyline`, `polygon`, `ellipse`, `image`, `clipPath`, `mask`, `filter`, `linearGradient`, `radialGradient`, `pattern`, `marker`, `symbol`, `foreignObject`, `switch`, `a`, `tspan`, etc.) | Parsed in SVG namespace. Different attribute handling (case-sensitive, different default attributes). |
+| ACCEPT | `foreignObject` → then HTML content | `foreignObject` re-enters HTML parsing mode. Its children are HTML. |
+| CLOSE_PARENT | HTML block elements (`div`, `p`, `table`, etc.) | If an HTML element appears directly in SVG (not in `foreignObject`), Chrome/Firefox close the SVG context and process the element in InBody mode. This is the "integration point" behavior. |
+
+**Pair rule:** `SVG_PARENT → svg-elements = FOREIGN`, `→ html-block = CLOSE_PARENT (exit foreign)`.
+
+---
+
+### `math`
+
+**Content model:** MathML namespace elements
+**Insertion mode:** InForeignContent
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| FOREIGN | MathML elements (`mrow`, `mi`, `mn`, `mo`, `msup`, `msub`, `mfrac`, `mroot`, `msqrt`, `mtext`, `mspace`, `mtable`, `mtr`, `mtd`, `mover`, `munder`, `munderover`, `mmultiscripts`, `mprescripts`, `none`, `annotation`, `annotation-xml`, `semantics`, etc.) | Parsed in MathML namespace. |
+| ACCEPT | `annotation-xml` → then HTML content | If `annotation-xml` has `encoding="text/html"`, re-enters HTML parsing. |
+| CLOSE_PARENT | HTML block elements | Same exit-foreign behavior as SVG. |
+
+**Pair rule:** `MATHML_PARENT → mathml-elements = FOREIGN`, `→ html-block = CLOSE_PARENT (exit foreign)`.
+
+---
+
+### `iframe`
+
+**Content model:** Text (fallback, ignored by modern browsers)
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| RAW_TEXT | Everything | Content between `<iframe>` and `</iframe>` is raw text — not parsed as HTML. Modern browsers ignore it entirely (it was fallback for non-iframe-supporting browsers). |
+
+**Pair rule:** `RAW_TEXT_PARENT`.
+
+---
+
+### `datalist`
+
+**Content model:** Phrasing content or `option` elements
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| ACCEPT | `option` | Options for the datalist suggestions. |
+| ACCEPT | Phrasing elements | Fallback content for non-datalist-aware browsers. |
+
+**Pair rule:** `PHRASING_PARENT` + `option`.
+
+---
+
+### Void Elements (cannot be parents)
+
+**Elements:** `area`, `base`, `br`, `col`, `embed`, `hr`, `img`, `input`, `link`, `meta`, `param`, `portal`, `source`, `track`, `wbr`
+
+| Action | Child elements | Chrome/Firefox behavior |
+|--------|---------------|------------------------|
+| VOID | Everything | These elements cannot have children. Parser self-closes them immediately. Any content "inside" them actually becomes a sibling. |
+
+**Pair rule:** `VOID → any = N/A`. No nesting possible.
+
+---
+
+## Part 2 — The Reduced Pair Rule Set
+
+The ~14,000 raw element×element pairs collapse into **17 parent rules** and **7 parser actions**:
+
+### Parent Rules (17)
+
+| # | Rule Name | Elements | Child Handling |
+|---|-----------|----------|----------------|
+| 1 | `FLOW_PARENT` | `body`, `div`, `article`, `section`, `nav`, `aside`, `main`, `search`, `blockquote`, `dialog`, `figcaption`, `figure`, `dd`, `dt`, `li`, `noscript`, `address`, `header`, `footer`, `form`, `fieldset`, `details`, `summary`, `legend`, `td`, `th`, `caption` | Accept all flow+phrasing. No auto-close. |
+| 2 | `PHRASING_BLOCK_PARENT` | `p`, `h1`–`h6`, `pre` | Accept phrasing. Auto-close on 39-element block set. |
+| 3 | `INLINE_PHRASING_PARENT` | `span`, `em`, `strong`, `b`, `i`, `u`, `s`, `small`, `cite`, `code`, `var`, `samp`, `kbd`, `sub`, `sup`, `abbr`, `bdi`, `bdo`, `data`, `dfn`, `mark`, `q`, `time`, `output`, `label` | Accept phrasing. Parser accepts blocks too (layout splits). |
+| 4 | `TRANSPARENT_PARENT` | `a`, `ins`, `del`, `map`, `canvas`, `object`, `slot` | Inherit parent's rule. |
+| 5 | `LIST_PARENT` | `ul`, `ol`, `menu` | Expect `li`. Tolerate anything. |
+| 6 | `DL_PARENT` | `dl` | Expect `dt`/`dd`/`div`. Tolerate anything. Cross-close dt↔dd. |
+| 7 | `TABLE_PARENT` | `table` | Accept table children. Foster-parent everything else. |
+| 8 | `TABLE_BODY_PARENT` | `thead`, `tbody`, `tfoot` | Accept `tr`. Wrap cells. Foster-parent rest. |
+| 9 | `TABLE_ROW_PARENT` | `tr` | Accept `td`/`th`. Foster-parent rest. |
+| 10 | `TABLE_CELL_PARENT` | `td`, `th` | FLOW_PARENT + auto-close on cells/table-structure. |
+| 11 | `COLGROUP_PARENT` | `colgroup` | Accept `col`. Close on anything else. |
+| 12 | `SELECT_PARENT` | `select` | Accept `option`/`optgroup`/`hr`. Drop rest. |
+| 13 | `OPTGROUP_PARENT` | `optgroup` | Accept `option`. Close on `optgroup`. Drop rest. |
+| 14 | `RAW_TEXT_PARENT` | `script`, `style`, `title`, `textarea`, `iframe`, `option` | No child elements. Raw text mode. |
+| 15 | `RUBY_PARENT` | `ruby` | Accept phrasing + `rt`/`rp`. Cross-close rt↔rp. |
+| 16 | `SVG_PARENT` | `svg` | Foreign content mode. Exit on HTML blocks. |
+| 17 | `MATHML_PARENT` | `math` | Foreign content mode. Exit on HTML blocks. |
+
+(Void elements don't need a parent rule — they can't have children.)
+
+### Chained Pair Actions (7)
+
+| # | Action | Trigger | Effect on tree |
+|---|--------|---------|----------------|
+| 1 | `ACCEPT` | Valid child | Insert as child. No tree modification. |
+| 2 | `CLOSE_PARENT` | Block tag in phrasing-block; table-structure in caption/cell; cell in cell/row; etc. | Close current element. Re-process tag in parent's context. **Chain: rule(grandparent, child)** |
+| 3 | `FOSTER` | Non-table content in table context | Move child before table ancestor. **Chain: rule(table's parent, child)** |
+| 4 | `WRAP(x)` | Missing intermediate (e.g., `tr` in `table` → wrap in `tbody`; `td` in `table` → wrap in `tbody` + `tr`) | Generate wrapper element(s). Insert child inside wrapper. **Chain: rule(wrapper, child)** |
+| 5 | `DROP` | Duplicate structural tag (`form`→`form`, select context rejects) | Ignore start tag. Content adopted by current parent. |
+| 6 | `CLOSE_REOPEN` | Same-type sibling (`li`→`li`, `dt`→`dd`, `option`→`option`, `button`→`button`) | Close current element of that type. Open new one. Sibling relationship. |
+| 7 | `RAW_TEXT` | Parent is raw text element | Switch to raw text/RCDATA mode. No child elements parsed. |
+
+### How Chaining Works
+
+A three-deep nesting `A → B → C` is resolved by:
+1. Look up `rule(A, B)` → get action for B
+2. If ACCEPT: look up `rule(B, C)` → get action for C
+3. If CLOSE_PARENT: look up `rule(A.parent, B)` → reprocess B in grandparent context
+4. If FOSTER: look up `rule(table.parent, B)` → reprocess B before table
+5. If WRAP(x): look up `rule(x, B)` → process B inside generated wrapper
+
+Every nesting depth is resolved pair-by-pair. No three-element rules needed. **The 17 parent rules × 7 actions are sufficient to handle all HTML nesting.**
+
+---
+
+## Part 3 — The Auto-Close Element Sets
+
+These are the exact element sets used in the pair rules above:
+
+### Set 1: Elements that close `<p>` (the p-closing set)
+
+```
+address, article, aside, blockquote, center, details, dialog, dir, div, dl,
+fieldset, figcaption, figure, footer, form, h1, h2, h3, h4, h5, h6, header,
+hgroup, hr, li, main, menu, nav, ol, p, pre, search, section, summary,
+table, ul
+```
+
+(39 elements. Also used for `h1`–`h6` and `pre`.)
+
+### Set 2: Elements that close `<li>`
+
+```
+li
+```
+
+(`<li>` only closes a preceding `<li>` if it's in scope.)
+
+### Set 3: Elements that close `<dt>` and `<dd>`
+
+```
+dt, dd
+```
+
+(`<dt>` closes `<dd>`, `<dd>` closes `<dt>`, `<dt>` closes `<dt>`, `<dd>` closes `<dd>`.)
+
+### Set 4: Elements that close `<option>`
+
+```
+option, optgroup
+```
+
+### Set 5: Elements that close table cell (`<td>`/`<th>`)
+
+```
+td, th, tr, caption, colgroup, thead, tbody, tfoot
+```
+
+(Anything that moves to a different table structural level.)
+
+### Set 6: Elements that close `<tr>`
+
+```
+tr, caption, colgroup, thead, tbody, tfoot
+```
+
+### Set 7: Elements that close `<thead>`/`<tbody>`/`<tfoot>`
+
+```
+caption, colgroup, thead, tbody, tfoot
+```
+
+### Set 8: Table-valid children (not foster-parented)
+
+```
+caption, colgroup, col, thead, tbody, tfoot, tr, td, th, script, template, style
+```
+
+### Set 9: Elements that exit foreign content (SVG/MathML)
+
+```
+b, big, blockquote, body, br, center, code, dd, div, dl, dt, em, embed,
+h1, h2, h3, h4, h5, h6, head, hr, i, img, li, listing, menu, meta, nobr,
+ol, p, pre, ruby, s, small, span, strong, strike, sub, sup, table, tt, u,
+ul, var
+```
+
+(Any of these encountered in SVG/MathML context causes the parser to exit foreign content.)
+
+### Set 10: Active formatting elements (reconstructed across splits)
+
+```
+a, b, big, code, em, font, i, nobr, s, small, strike, strong, tt, u
+```
+
+These are pushed onto the "list of active formatting elements" and reconstructed when the tree is split by auto-closing or foster parenting.
+
+---
+
+## Part 4 — Layout-Level Pair Interactions
+
+After the parser builds the correct tree, layout must handle these pair interactions. These are **independent of parser rules** — they depend on the computed `display` value.
+
+### Layout Pair Rule 1: Block in Block
+
+**When:** Parent `display` is `block`/`flow`, child `display` is `block`/`flow`
+**Action:** Stack vertically. Margin collapse between siblings and with parent (unless BFC boundary).
+**Elements:** ~2,000 pairs
+
+### Layout Pair Rule 2: Inline in Block
+
+**When:** Parent `display` is `block`/`flow`, child `display` is `inline`
+**Action:** Create anonymous inline formatting context. Line boxes are generated.
+**Elements:** ~1,500 pairs
+
+### Layout Pair Rule 3: Mixed Block+Inline in Block
+
+**When:** Parent `display` is `block`/`flow`, children are mix of block and inline
+**Action:** Wrap consecutive inline runs in anonymous block boxes, then stack all blocks vertically.
+**Elements:** Triggered by sibling relationships, not parent-child.
+
+### Layout Pair Rule 4: Block in Inline (anonymous block generation)
+
+**When:** Parent `display` is `inline`, child `display` is `block`
+**Action:** Split inline parent into fragments. Wrap fragments in anonymous block boxes. Block child becomes a sibling of the anonymous blocks.
+**Elements:** ~300 pairs (inline parents × block children)
+
+### Layout Pair Rule 5: Inline in Inline
+
+**When:** Parent `display` is `inline`, child `display` is `inline`
+**Action:** Nested inline boxes. Participate in same inline formatting context.
+**Elements:** ~800 pairs
+
+### Layout Pair Rule 6: Table Internal
+
+**When:** Any table `display` value (`table`, `table-row`, `table-cell`, etc.)
+**Action:** Table layout algorithm. Fixed or automatic width computation. Cell sizing. Border collapse.
+**Elements:** ~50 pairs (strict hierarchy)
+
+### Layout Pair Rule 7: Flex/Grid (CSS-driven)
+
+**When:** Parent `display` is `flex`/`inline-flex`/`grid`/`inline-grid`
+**Action:** All children become flex/grid items. Float, clear, vertical-align are ignored on items. Anonymous items generated for text nodes.
+**Elements:** Any parent×child pair where CSS applies `display: flex/grid`.
+
+### Layout Pair Rule 8: Replaced Element as Child
+
+**When:** Child is a replaced element (`img`, `input`, `select`, `textarea`, `iframe`, `canvas`, `video`, `embed`, `object`)
+**Action:** Use intrinsic dimensions. Aspect ratio constraints. No flow of child content into parent's formatting context.
+**Elements:** ~200 pairs
+
+### Layout Pair Rule 9: Out-of-Flow (positioned/float)
+
+**When:** Child has `position: absolute/fixed` or `float: left/right`
+**Action:** Remove from normal flow. Containing block changes. Does not affect parent's size (for absolute/fixed). Float affects sibling layout.
+**Elements:** Any parent×child pair where CSS applies positioning.
+
+### Layout Pair Rule 10: Establishes BFC
+
+**When:** Parent establishes a new block formatting context (overflow≠visible, display:flow-root, float, position:absolute/fixed, inline-block, table-cell, flex/grid item, etc.)
+**Action:** Contains floats, prevents margin collapse with children, independent formatting context.
+**Elements:** ~500 pairs (specific parents that establish BFC × any child)
+
+---
+
+## Part 5 — Complete Pair Count
+
+### Parser Level
+
+| Parent Rule | # Parents | # Distinct Outcomes | # Effective Pairs |
+|-------------|-----------|--------------------|--------------------|
+| FLOW_PARENT | 27 | 2 (accept/drop html,head) | 27 × 147 = 3,969 |
+| PHRASING_BLOCK_PARENT | 8 | 2 (accept phrasing / close on block) | 8 × 147 = 1,176 |
+| INLINE_PHRASING_PARENT | 25 | 1 (accept all) | 25 × 147 = 3,675 |
+| TRANSPARENT_PARENT | 7 | (delegates to parent) | 7 × 147 = 1,029 |
+| LIST_PARENT | 3 | 2 (accept li / tolerate rest) | 3 × 147 = 441 |
+| DL_PARENT | 1 | 2 (accept dt,dd / tolerate rest) | 1 × 147 = 147 |
+| TABLE_PARENT | 1 | 3 (accept / wrap / foster) | 1 × 147 = 147 |
+| TABLE_BODY_PARENT | 3 | 3 (accept / wrap / foster) | 3 × 147 = 441 |
+| TABLE_ROW_PARENT | 1 | 3 (accept / close / foster) | 1 × 147 = 147 |
+| TABLE_CELL_PARENT | 2 | 2 (flow + close on table tags) | 2 × 147 = 294 |
+| COLGROUP_PARENT | 1 | 2 (accept col / close rest) | 1 × 147 = 147 |
+| SELECT_PARENT | 1 | 3 (accept / close / drop) | 1 × 147 = 147 |
+| OPTGROUP_PARENT | 1 | 2 (accept option / drop rest) | 1 × 147 = 147 |
+| RAW_TEXT_PARENT | 6 | 1 (raw text) | 6 × 147 = 882 |
+| RUBY_PARENT | 1 | 2 (phrasing + rt/rp) | 1 × 147 = 147 |
+| SVG_PARENT | 1 | 2 (foreign / exit) | 1 × SVG elements |
+| MATHML_PARENT | 1 | 2 (foreign / exit) | 1 × MathML elements |
+| VOID (no children) | 15 | 0 | 0 |
+| **Total** | **105** | | **~12,936 raw pairs** |
+
+Reduced to: **17 parent rules × 7 actions + 10 element sets = 129 rule components**
+
+### Layout Level
+
+| Layout Rule | Trigger | Pairs Affected |
+|-------------|---------|----------------|
+| Block in Block | display pairs | ~2,000 |
+| Inline in Block | display pairs | ~1,500 |
+| Block in Inline | display pairs | ~300 |
+| Inline in Inline | display pairs | ~800 |
+| Table layout | table display | ~50 |
+| Replaced child | replaced elements | ~200 |
+| Anonymous box gen | mixed children | (sibling-triggered) |
+| BFC establishment | overflow/float/etc. | ~500 |
+| Flex/Grid | CSS-driven | (any pair) |
+| Positioned | CSS-driven | (any pair) |
+
+Reduced to: **10 layout rules keyed on computed `display` value**
+
+---
+
+## Grand Total: Minimal Chained Pair Rule Set
+
+```
+Parser:  17 parent rules + 7 actions + 10 element sets
+Layout:  10 display-based rules
+─────────────────────────────────────────────────────
+Total:   44 rule components handle all ~14,000 element pairs
+```
+
+Every HTML nesting scenario resolves by:
+1. Look up parent's rule (17 options)
+2. Check child against element sets (10 sets)
+3. Execute action (7 options)
+4. Chain to next pair if tree was modified (CLOSE_PARENT/FOSTER/WRAP)
+5. After tree is built, apply layout rule based on computed display (10 options)
