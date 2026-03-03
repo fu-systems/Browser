@@ -19131,241 +19131,241 @@ Children context: IFC (inline formatting context of ancestor BFC)
 
 ---
 
-## `<rp>` (rule: RAW_TEXT)
+## `<rp>` (rule: INLINE_PHRASING_PARENT)
 UA default: `display:none`
 Children context: none (no boxes generated)
 
-9281. `<rp> → <a>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9281. `<rp> → <a>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; color:linkcolor; text-decoration:underline; cursor:pointer` | context: none (no boxes generated)
-9282. `<rp> → <abbr>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9282. `<rp> → <abbr>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline` | context: none (no boxes generated)
-9283. `<rp> → <address>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9283. `<rp> → <address>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block; font-style:italic` | context: none (no boxes generated)
-9284. `<rp> → <area>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9284. `<rp> → <area>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:none` | context: none (no boxes generated)
-9285. `<rp> → <article>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9285. `<rp> → <article>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block` | context: none (no boxes generated)
-9286. `<rp> → <aside>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9286. `<rp> → <aside>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block` | context: none (no boxes generated)
-9287. `<rp> → <audio>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9287. `<rp> → <audio>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:none` | context: none (no boxes generated)
-9288. `<rp> → <b>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9288. `<rp> → <b>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; font-weight:bold` | context: none (no boxes generated)
-9289. `<rp> → <base>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9289. `<rp> → <base>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:none` | context: none (no boxes generated)
-9290. `<rp> → <bdi>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9290. `<rp> → <bdi>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; unicode-bidi:isolate` | context: none (no boxes generated)
-9291. `<rp> → <bdo>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9291. `<rp> → <bdo>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; unicode-bidi:bidi-override` | context: none (no boxes generated)
-9292. `<rp> → <blockquote>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9292. `<rp> → <blockquote>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block; margin-block:1em; margin-inline:40px` | context: none (no boxes generated)
-9293. `<rp> → <body>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9293. `<rp> → <body>` = **DROP** — Start tag ignored entirely. Content (if any) adopted by current parent.
    parent CSS: `display:none` | child CSS: `display:block; margin:8px` | context: none (no boxes generated)
-9294. `<rp> → <br>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9294. `<rp> → <br>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline` | context: none (no boxes generated)
-9295. `<rp> → <button>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9295. `<rp> → <button>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline-block; text-align:center; cursor:default; border:outset; padding:1px 6px; font:inherit` | context: none (no boxes generated)
-9296. `<rp> → <canvas>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9296. `<rp> → <canvas>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; width:300px; height:150px` | context: none (no boxes generated)
-9297. `<rp> → <caption>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9297. `<rp> → <caption>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:table-caption; text-align:center` | context: none (no boxes generated)
-9298. `<rp> → <cite>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9298. `<rp> → <cite>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; font-style:italic` | context: none (no boxes generated)
-9299. `<rp> → <code>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9299. `<rp> → <code>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; font-family:monospace` | context: none (no boxes generated)
-9300. `<rp> → <col>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9300. `<rp> → <col>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:table-column` | context: none (no boxes generated)
-9301. `<rp> → <colgroup>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9301. `<rp> → <colgroup>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:table-column-group` | context: none (no boxes generated)
-9302. `<rp> → <data>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9302. `<rp> → <data>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline` | context: none (no boxes generated)
-9303. `<rp> → <datalist>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9303. `<rp> → <datalist>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:none` | context: none (no boxes generated)
-9304. `<rp> → <dd>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9304. `<rp> → <dd>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block; margin-inline-start:40px` | context: none (no boxes generated)
-9305. `<rp> → <del>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9305. `<rp> → <del>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; text-decoration:line-through` | context: none (no boxes generated)
-9306. `<rp> → <details>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9306. `<rp> → <details>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block` | context: none (no boxes generated)
-9307. `<rp> → <dfn>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9307. `<rp> → <dfn>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; font-style:italic` | context: none (no boxes generated)
-9308. `<rp> → <dialog>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9308. `<rp> → <dialog>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block; position:absolute; inset-inline:0; width:fit-content; height:fit-content; margin:auto; border:solid; padding:1em; background:canvas; color:canvastext` | context: none (no boxes generated)
-9309. `<rp> → <div>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9309. `<rp> → <div>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block` | context: none (no boxes generated)
-9310. `<rp> → <dl>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9310. `<rp> → <dl>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block; margin-block:1em` | context: none (no boxes generated)
-9311. `<rp> → <dt>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9311. `<rp> → <dt>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block` | context: none (no boxes generated)
-9312. `<rp> → <em>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9312. `<rp> → <em>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; font-style:italic` | context: none (no boxes generated)
-9313. `<rp> → <embed>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9313. `<rp> → <embed>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline` | context: none (no boxes generated)
-9314. `<rp> → <fieldset>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9314. `<rp> → <fieldset>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block; border:2px groove; padding:0.35em 0.75em 0.625em; margin-inline:2px; min-inline-size:min-content` | context: none (no boxes generated)
-9315. `<rp> → <figcaption>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9315. `<rp> → <figcaption>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block` | context: none (no boxes generated)
-9316. `<rp> → <figure>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9316. `<rp> → <figure>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block; margin-block:1em; margin-inline:40px` | context: none (no boxes generated)
-9317. `<rp> → <footer>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9317. `<rp> → <footer>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block` | context: none (no boxes generated)
-9318. `<rp> → <form>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9318. `<rp> → <form>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block` | context: none (no boxes generated)
-9319. `<rp> → <h1>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9319. `<rp> → <h1>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block; font-size:2em; font-weight:bold; margin-block:0.67em` | context: none (no boxes generated)
-9320. `<rp> → <h2>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9320. `<rp> → <h2>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block; font-size:1.5em; font-weight:bold; margin-block:0.83em` | context: none (no boxes generated)
-9321. `<rp> → <h3>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9321. `<rp> → <h3>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block; font-size:1.17em; font-weight:bold; margin-block:1em` | context: none (no boxes generated)
-9322. `<rp> → <h4>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9322. `<rp> → <h4>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block; font-weight:bold; margin-block:1.33em` | context: none (no boxes generated)
-9323. `<rp> → <h5>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9323. `<rp> → <h5>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block; font-size:0.83em; font-weight:bold; margin-block:1.67em` | context: none (no boxes generated)
-9324. `<rp> → <h6>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9324. `<rp> → <h6>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block; font-size:0.67em; font-weight:bold; margin-block:2.33em` | context: none (no boxes generated)
-9325. `<rp> → <head>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9325. `<rp> → <head>` = **DROP** — Start tag ignored entirely. Content (if any) adopted by current parent.
    parent CSS: `display:none` | child CSS: `display:none` | context: none (no boxes generated)
-9326. `<rp> → <header>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9326. `<rp> → <header>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block` | context: none (no boxes generated)
-9327. `<rp> → <hgroup>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9327. `<rp> → <hgroup>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block` | context: none (no boxes generated)
-9328. `<rp> → <hr>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9328. `<rp> → <hr>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block; border-style:inset; border-width:1px; margin-block:0.5em; overflow:hidden` | context: none (no boxes generated)
-9329. `<rp> → <html>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9329. `<rp> → <html>` = **DROP** — Start tag ignored entirely. Content (if any) adopted by current parent.
    parent CSS: `display:none` | child CSS: `display:block` | context: none (no boxes generated)
-9330. `<rp> → <i>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9330. `<rp> → <i>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; font-style:italic` | context: none (no boxes generated)
-9331. `<rp> → <iframe>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9331. `<rp> → <iframe>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; border:2px inset; width:300px; height:150px` | context: none (no boxes generated)
-9332. `<rp> → <img>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9332. `<rp> → <img>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline` | context: none (no boxes generated)
-9333. `<rp> → <input>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9333. `<rp> → <input>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline-block; cursor:text; border:1px solid; padding:1px; font:inherit` | context: none (no boxes generated)
-9334. `<rp> → <ins>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9334. `<rp> → <ins>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; text-decoration:underline` | context: none (no boxes generated)
-9335. `<rp> → <kbd>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9335. `<rp> → <kbd>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; font-family:monospace` | context: none (no boxes generated)
-9336. `<rp> → <label>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9336. `<rp> → <label>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; cursor:default` | context: none (no boxes generated)
-9337. `<rp> → <legend>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9337. `<rp> → <legend>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block; padding-inline:2px` | context: none (no boxes generated)
-9338. `<rp> → <li>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9338. `<rp> → <li>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:list-item` | context: none (no boxes generated)
-9339. `<rp> → <link>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9339. `<rp> → <link>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:none` | context: none (no boxes generated)
-9340. `<rp> → <main>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9340. `<rp> → <main>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block` | context: none (no boxes generated)
-9341. `<rp> → <map>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9341. `<rp> → <map>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline` | context: none (no boxes generated)
-9342. `<rp> → <mark>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9342. `<rp> → <mark>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; background:yellow; color:black` | context: none (no boxes generated)
-9343. `<rp> → <math>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9343. `<rp> → <math>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline` | context: none (no boxes generated)
-9344. `<rp> → <menu>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9344. `<rp> → <menu>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block; list-style-type:disc; margin-block:1em; padding-inline-start:40px` | context: none (no boxes generated)
-9345. `<rp> → <meta>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9345. `<rp> → <meta>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:none` | context: none (no boxes generated)
-9346. `<rp> → <meter>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9346. `<rp> → <meter>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline-block; width:5em; height:1em; vertical-align:-0.2em` | context: none (no boxes generated)
-9347. `<rp> → <nav>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9347. `<rp> → <nav>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block` | context: none (no boxes generated)
-9348. `<rp> → <noscript>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9348. `<rp> → <noscript>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline` | context: none (no boxes generated)
-9349. `<rp> → <object>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9349. `<rp> → <object>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline` | context: none (no boxes generated)
-9350. `<rp> → <ol>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9350. `<rp> → <ol>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block; list-style-type:decimal; margin-block:1em; padding-inline-start:40px` | context: none (no boxes generated)
-9351. `<rp> → <optgroup>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9351. `<rp> → <optgroup>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block; font-weight:bold` | context: none (no boxes generated)
-9352. `<rp> → <option>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9352. `<rp> → <option>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block` | context: none (no boxes generated)
-9353. `<rp> → <output>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9353. `<rp> → <output>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline` | context: none (no boxes generated)
-9354. `<rp> → <p>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9354. `<rp> → <p>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block; margin-block:1em` | context: none (no boxes generated)
-9355. `<rp> → <param>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9355. `<rp> → <param>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:none` | context: none (no boxes generated)
-9356. `<rp> → <picture>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9356. `<rp> → <picture>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:contents` | context: none (no boxes generated)
-9357. `<rp> → <portal>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9357. `<rp> → <portal>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline` | context: none (no boxes generated)
-9358. `<rp> → <pre>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9358. `<rp> → <pre>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block; font-family:monospace; white-space:pre; margin-block:1em` | context: none (no boxes generated)
-9359. `<rp> → <progress>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9359. `<rp> → <progress>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline-block; width:10em; height:1em; vertical-align:-0.2em` | context: none (no boxes generated)
-9360. `<rp> → <q>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9360. `<rp> → <q>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline` | context: none (no boxes generated)
-9361. `<rp> → <rp>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9361. `<rp> → <rp>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:none` | context: none (no boxes generated)
-9362. `<rp> → <rt>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9362. `<rp> → <rt>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:ruby-text; font-size:0.5em` | context: none (no boxes generated)
-9363. `<rp> → <ruby>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9363. `<rp> → <ruby>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:ruby` | context: none (no boxes generated)
-9364. `<rp> → <s>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9364. `<rp> → <s>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; text-decoration:line-through` | context: none (no boxes generated)
-9365. `<rp> → <samp>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9365. `<rp> → <samp>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; font-family:monospace` | context: none (no boxes generated)
-9366. `<rp> → <script>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9366. `<rp> → <script>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:none` | context: none (no boxes generated)
-9367. `<rp> → <search>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9367. `<rp> → <search>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block` | context: none (no boxes generated)
-9368. `<rp> → <section>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9368. `<rp> → <section>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block` | context: none (no boxes generated)
-9369. `<rp> → <select>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9369. `<rp> → <select>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline-block; border:1px solid; white-space:pre; cursor:default` | context: none (no boxes generated)
-9370. `<rp> → <slot>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9370. `<rp> → <slot>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:contents` | context: none (no boxes generated)
-9371. `<rp> → <small>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9371. `<rp> → <small>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; font-size:smaller` | context: none (no boxes generated)
-9372. `<rp> → <source>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9372. `<rp> → <source>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:none` | context: none (no boxes generated)
-9373. `<rp> → <span>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9373. `<rp> → <span>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline` | context: none (no boxes generated)
-9374. `<rp> → <strong>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9374. `<rp> → <strong>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; font-weight:bold` | context: none (no boxes generated)
-9375. `<rp> → <style>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9375. `<rp> → <style>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:none` | context: none (no boxes generated)
-9376. `<rp> → <sub>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9376. `<rp> → <sub>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; vertical-align:sub; font-size:smaller` | context: none (no boxes generated)
-9377. `<rp> → <summary>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9377. `<rp> → <summary>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block; cursor:pointer` | context: none (no boxes generated)
-9378. `<rp> → <sup>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9378. `<rp> → <sup>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; vertical-align:super; font-size:smaller` | context: none (no boxes generated)
-9379. `<rp> → <svg>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9379. `<rp> → <svg>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; overflow:hidden` | context: none (no boxes generated)
-9380. `<rp> → <table>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9380. `<rp> → <table>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:table; border-collapse:separate; border-spacing:2px; border-color:gray; text-indent:0` | context: none (no boxes generated)
-9381. `<rp> → <tbody>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9381. `<rp> → <tbody>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:table-row-group; vertical-align:middle; border-color:inherit` | context: none (no boxes generated)
-9382. `<rp> → <td>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9382. `<rp> → <td>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:table-cell; padding:1px; vertical-align:inherit; text-align:inherit` | context: none (no boxes generated)
-9383. `<rp> → <template>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9383. `<rp> → <template>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:none` | context: none (no boxes generated)
-9384. `<rp> → <textarea>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9384. `<rp> → <textarea>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline-block; border:1px solid; padding:2px; font-family:monospace; white-space:pre-wrap; overflow:auto; resize:both; cursor:text` | context: none (no boxes generated)
-9385. `<rp> → <tfoot>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9385. `<rp> → <tfoot>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:table-footer-group; vertical-align:middle; border-color:inherit` | context: none (no boxes generated)
-9386. `<rp> → <th>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9386. `<rp> → <th>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:table-cell; padding:1px; font-weight:bold; text-align:center; vertical-align:inherit` | context: none (no boxes generated)
-9387. `<rp> → <thead>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9387. `<rp> → <thead>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:table-header-group; vertical-align:middle; border-color:inherit` | context: none (no boxes generated)
-9388. `<rp> → <time>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9388. `<rp> → <time>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline` | context: none (no boxes generated)
-9389. `<rp> → <title>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9389. `<rp> → <title>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:none` | context: none (no boxes generated)
-9390. `<rp> → <tr>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9390. `<rp> → <tr>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:table-row; vertical-align:inherit; border-color:inherit` | context: none (no boxes generated)
-9391. `<rp> → <track>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9391. `<rp> → <track>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:none` | context: none (no boxes generated)
-9392. `<rp> → <u>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9392. `<rp> → <u>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; text-decoration:underline` | context: none (no boxes generated)
-9393. `<rp> → <ul>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9393. `<rp> → <ul>` = **ACCEPT** — Parser accepts (no auto-close). Layout splits inline parent into fragments around the block child. Anonymous block boxes generated.
    parent CSS: `display:none` | child CSS: `display:block; list-style-type:disc; margin-block:1em; padding-inline-start:40px` | context: none (no boxes generated)
-9394. `<rp> → <var>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9394. `<rp> → <var>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; font-style:italic` | context: none (no boxes generated)
-9395. `<rp> → <video>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9395. `<rp> → <video>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline; object-fit:contain` | context: none (no boxes generated)
-9396. `<rp> → <wbr>` = **RAW_TEXT** — Parent is in raw text mode. No child elements parsed. All content is text until end tag.
+9396. `<rp> → <wbr>` = **ACCEPT** — Valid phrasing child. Inline box in parent's inline formatting context.
    parent CSS: `display:none` | child CSS: `display:inline` | context: none (no boxes generated)
 
 ---
@@ -27741,12 +27741,12 @@ Children context: IFC (inline formatting context of ancestor BFC)
 
 | Action | Count | % |
 |--------|-------|---|
-| ACCEPT | 9215 | 68.5% |
+| ACCEPT | 9328 | 69.3% |
 | VOID | 1740 | 12.9% |
-| RAW_TEXT | 812 | 6.0% |
+| RAW_TEXT | 696 | 5.2% |
 | CLOSE_PARENT | 620 | 4.6% |
 | FOSTER | 527 | 3.9% |
-| DROP | 417 | 3.1% |
+| DROP | 420 | 3.1% |
 | WRAP_BODY | 114 | 0.8% |
 | WRAP_TR | 6 | 0.0% |
 | WRAP_TBODY_TR | 2 | 0.0% |

@@ -282,7 +282,7 @@ PHRASING_BLOCK_PARENTS = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "pre"}
 INLINE_PHRASING_PARENTS = {
     "span", "em", "strong", "b", "i", "u", "s", "small", "cite", "code",
     "var", "samp", "kbd", "sub", "sup", "abbr", "bdi", "bdo", "data",
-    "dfn", "mark", "q", "time", "output", "label",
+    "dfn", "mark", "q", "time", "output", "label", "rp",
 }
 
 TRANSPARENT_PARENTS = {"a", "ins", "del", "map", "canvas", "object", "slot"}
@@ -414,9 +414,10 @@ def get_parent_rule(parent):
     if parent in RAW_TEXT_PARENTS:
         return "RAW_TEXT"
     if parent == "option":
-        return "RAW_TEXT"  # option is text-only in select context
-    if parent == "rp":
-        return "RAW_TEXT"  # rp is text-only
+        return "RAW_TEXT"  # option is text-only in select context (InSelect mode drops tags)
+    # Note: <rp> is NOT raw text in Chrome. It's a normal InBody element.
+    # The spec says text-only, but Chrome does not enforce this at parser level.
+    # rp falls through to INLINE_PHRASING_PARENT below.
     if parent == "html":
         return "HTML_ROOT"
     if parent == "head":
