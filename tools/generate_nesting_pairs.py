@@ -626,78 +626,48 @@ def _flow_action(parent, child):
 
 def generate():
     lines = []
-    lines.append("# HTML Element Nesting Pairs — Full Enumeration")
+    lines.append("# HTML Element Nesting Pairs — Full Exhaustive List")
     lines.append("")
-    lines.append("Every parent × child pair with parser action and browser behavior.")
-    lines.append("Generated from the HTML parsing spec rules. For analysis by the Pane pair-rule engine.")
+    lines.append("Every individual parent → child pair on its own line.")
+    lines.append(f"**{len(ALL_ELEMENTS)} elements × {len(ALL_ELEMENTS)} elements = {len(ALL_ELEMENTS)**2} pairs.**")
     lines.append("")
-    lines.append(f"**Total elements:** {len(ALL_ELEMENTS)}")
-    lines.append(f"**Total pairs:** {len(ALL_ELEMENTS) * len(ALL_ELEMENTS)}")
-    lines.append("")
-    lines.append("## Action Legend")
-    lines.append("")
-    lines.append("| Code | Meaning |")
-    lines.append("|------|---------|")
-    for code, desc in sorted(BEHAVIOR.items()):
-        lines.append(f"| `{code}` | {desc} |")
+    lines.append("Format: `parent → child = ACTION` — note")
     lines.append("")
 
     # Stats
     action_counts = {}
-    rule_counts = {}
+    pair_num = 0
 
     for parent in ALL_ELEMENTS:
         rule = get_parent_rule(parent)
         lines.append("---")
         lines.append("")
-        lines.append(f"### `<{parent}>` — Rule: `{rule}`")
+        lines.append(f"## `<{parent}>` (rule: {rule})")
         lines.append("")
 
-        pairs = []
         for child in ALL_ELEMENTS:
+            pair_num += 1
             action, behavior = get_action(parent, child)
-            pairs.append((child, action, behavior))
             action_counts[action] = action_counts.get(action, 0) + 1
-            rule_counts[rule] = rule_counts.get(rule, 0) + 1
-
-        # Group by action for readability
-        by_action = {}
-        for child, action, behavior in pairs:
-            key = (action, behavior)
-            by_action.setdefault(key, []).append(child)
-
-        for (action, behavior), children in sorted(by_action.items()):
-            children_str = ", ".join(f"`{c}`" for c in children)
             desc = BEHAVIOR.get(behavior, behavior)
-            lines.append(f"- **{action}** → {children_str}")
-            lines.append(f"  - {desc}")
-            lines.append("")
+            lines.append(f"{pair_num}. `<{parent}> → <{child}>` = **{action}** — {desc}")
+
+        lines.append("")
 
     # Summary
     lines.append("---")
     lines.append("")
-    lines.append("## Summary — Action Distribution")
+    lines.append("## Summary")
     lines.append("")
-    lines.append("| Action | Count | % of Total |")
-    lines.append("|--------|-------|-----------|")
+    lines.append(f"**Total pairs listed:** {pair_num}")
+    lines.append("")
+    lines.append("| Action | Count | % |")
+    lines.append("|--------|-------|---|")
     total = sum(action_counts.values())
     for action, count in sorted(action_counts.items(), key=lambda x: -x[1]):
         pct = count / total * 100
-        lines.append(f"| `{action}` | {count} | {pct:.1f}% |")
+        lines.append(f"| {action} | {count} | {pct:.1f}% |")
     lines.append(f"| **Total** | **{total}** | **100%** |")
-    lines.append("")
-
-    lines.append("## Summary — Parent Rule Distribution")
-    lines.append("")
-    lines.append("| Parent Rule | # Pairs | # Elements Using Rule |")
-    lines.append("|-------------|---------|----------------------|")
-    rule_elements = {}
-    for parent in ALL_ELEMENTS:
-        r = get_parent_rule(parent)
-        rule_elements.setdefault(r, []).append(parent)
-    for rule, elements in sorted(rule_elements.items(), key=lambda x: -rule_counts.get(x[0], 0)):
-        count = rule_counts.get(rule, 0)
-        lines.append(f"| `{rule}` | {count} | {len(elements)} ({', '.join(elements[:5])}{'...' if len(elements)>5 else ''}) |")
     lines.append("")
 
     return "\n".join(lines)
