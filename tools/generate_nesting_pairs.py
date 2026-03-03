@@ -101,6 +101,173 @@ SELECT_CLOSING = {"select", "input", "textarea"}
 # Interactive elements (forbidden inside <a>)
 INTERACTIVE = {"a", "button", "details", "embed", "iframe", "label", "select", "textarea"}
 
+# ─── UA default styles per element (Chromium/Firefox consensus) ───
+# Each entry: { property: value, ... }
+# Only non-initial values listed (initial = what CSS spec defaults to)
+
+UA_STYLES = {
+    "a":          {"display": "inline", "color": "linkcolor", "text-decoration": "underline", "cursor": "pointer"},
+    "abbr":       {"display": "inline"},
+    "address":    {"display": "block", "font-style": "italic"},
+    "area":       {"display": "none"},
+    "article":    {"display": "block"},
+    "aside":      {"display": "block"},
+    "audio":      {"display": "none"},  # without controls attr
+    "b":          {"display": "inline", "font-weight": "bold"},
+    "base":       {"display": "none"},
+    "bdi":        {"display": "inline", "unicode-bidi": "isolate"},
+    "bdo":        {"display": "inline", "unicode-bidi": "bidi-override"},
+    "blockquote": {"display": "block", "margin-block": "1em", "margin-inline": "40px"},
+    "body":       {"display": "block", "margin": "8px"},
+    "br":         {"display": "inline"},  # generates line break
+    "button":     {"display": "inline-block", "text-align": "center", "cursor": "default", "border": "outset", "padding": "1px 6px", "font": "inherit"},
+    "canvas":     {"display": "inline", "width": "300px", "height": "150px"},  # replaced
+    "caption":    {"display": "table-caption", "text-align": "center"},
+    "cite":       {"display": "inline", "font-style": "italic"},
+    "code":       {"display": "inline", "font-family": "monospace"},
+    "col":        {"display": "table-column"},
+    "colgroup":   {"display": "table-column-group"},
+    "data":       {"display": "inline"},
+    "datalist":   {"display": "none"},
+    "dd":         {"display": "block", "margin-inline-start": "40px"},
+    "del":        {"display": "inline", "text-decoration": "line-through"},
+    "details":    {"display": "block"},
+    "dfn":        {"display": "inline", "font-style": "italic"},
+    "dialog":     {"display": "block", "position": "absolute", "inset-inline": "0", "width": "fit-content", "height": "fit-content", "margin": "auto", "border": "solid", "padding": "1em", "background": "canvas", "color": "canvastext"},
+    "div":        {"display": "block"},
+    "dl":         {"display": "block", "margin-block": "1em"},
+    "dt":         {"display": "block"},
+    "em":         {"display": "inline", "font-style": "italic"},
+    "embed":      {"display": "inline"},  # replaced
+    "fieldset":   {"display": "block", "border": "2px groove", "padding": "0.35em 0.75em 0.625em", "margin-inline": "2px", "min-inline-size": "min-content"},
+    "figcaption": {"display": "block"},
+    "figure":     {"display": "block", "margin-block": "1em", "margin-inline": "40px"},
+    "footer":     {"display": "block"},
+    "form":       {"display": "block"},
+    "h1":         {"display": "block", "font-size": "2em", "font-weight": "bold", "margin-block": "0.67em"},
+    "h2":         {"display": "block", "font-size": "1.5em", "font-weight": "bold", "margin-block": "0.83em"},
+    "h3":         {"display": "block", "font-size": "1.17em", "font-weight": "bold", "margin-block": "1em"},
+    "h4":         {"display": "block", "font-weight": "bold", "margin-block": "1.33em"},
+    "h5":         {"display": "block", "font-size": "0.83em", "font-weight": "bold", "margin-block": "1.67em"},
+    "h6":         {"display": "block", "font-size": "0.67em", "font-weight": "bold", "margin-block": "2.33em"},
+    "head":       {"display": "none"},
+    "header":     {"display": "block"},
+    "hgroup":     {"display": "block"},
+    "hr":         {"display": "block", "border-style": "inset", "border-width": "1px", "margin-block": "0.5em", "overflow": "hidden"},
+    "html":       {"display": "block"},
+    "i":          {"display": "inline", "font-style": "italic"},
+    "iframe":     {"display": "inline", "border": "2px inset", "width": "300px", "height": "150px"},  # replaced
+    "img":        {"display": "inline"},  # replaced
+    "input":      {"display": "inline-block", "cursor": "text", "border": "1px solid", "padding": "1px", "font": "inherit"},  # type-dependent
+    "ins":        {"display": "inline", "text-decoration": "underline"},
+    "kbd":        {"display": "inline", "font-family": "monospace"},
+    "label":      {"display": "inline", "cursor": "default"},
+    "legend":     {"display": "block", "padding-inline": "2px"},
+    "li":         {"display": "list-item"},
+    "link":       {"display": "none"},
+    "main":       {"display": "block"},
+    "map":        {"display": "inline"},
+    "mark":       {"display": "inline", "background": "yellow", "color": "black"},
+    "math":       {"display": "inline"},  # MathML namespace
+    "menu":       {"display": "block", "list-style-type": "disc", "margin-block": "1em", "padding-inline-start": "40px"},
+    "meta":       {"display": "none"},
+    "meter":      {"display": "inline-block", "width": "5em", "height": "1em", "vertical-align": "-0.2em"},
+    "nav":        {"display": "block"},
+    "noscript":   {"display": "inline"},  # block when contains block children
+    "object":     {"display": "inline"},  # replaced
+    "ol":         {"display": "block", "list-style-type": "decimal", "margin-block": "1em", "padding-inline-start": "40px"},
+    "optgroup":   {"display": "block", "font-weight": "bold"},  # inside select; platform-native
+    "option":     {"display": "block"},  # inside select; platform-native
+    "output":     {"display": "inline"},
+    "p":          {"display": "block", "margin-block": "1em"},
+    "param":      {"display": "none"},
+    "picture":    {"display": "contents"},  # effectively transparent
+    "portal":     {"display": "inline"},  # replaced
+    "pre":        {"display": "block", "font-family": "monospace", "white-space": "pre", "margin-block": "1em"},
+    "progress":   {"display": "inline-block", "width": "10em", "height": "1em", "vertical-align": "-0.2em"},
+    "q":          {"display": "inline"},  # ::before{content:open-quote} ::after{content:close-quote}
+    "rp":         {"display": "none"},  # ruby-aware; inline fallback
+    "rt":         {"display": "ruby-text", "font-size": "0.5em"},  # display:ruby-text
+    "ruby":       {"display": "ruby"},
+    "s":          {"display": "inline", "text-decoration": "line-through"},
+    "samp":       {"display": "inline", "font-family": "monospace"},
+    "script":     {"display": "none"},
+    "search":     {"display": "block"},
+    "section":    {"display": "block"},
+    "select":     {"display": "inline-block", "border": "1px solid", "white-space": "pre", "cursor": "default"},
+    "slot":       {"display": "contents"},
+    "small":      {"display": "inline", "font-size": "smaller"},
+    "source":     {"display": "none"},
+    "span":       {"display": "inline"},
+    "strong":     {"display": "inline", "font-weight": "bold"},
+    "style":      {"display": "none"},
+    "sub":        {"display": "inline", "vertical-align": "sub", "font-size": "smaller"},
+    "summary":    {"display": "block", "cursor": "pointer"},  # display:list-item with disclosure marker
+    "sup":        {"display": "inline", "vertical-align": "super", "font-size": "smaller"},
+    "svg":        {"display": "inline", "overflow": "hidden"},  # SVG namespace
+    "table":      {"display": "table", "border-collapse": "separate", "border-spacing": "2px", "border-color": "gray", "text-indent": "0"},
+    "tbody":      {"display": "table-row-group", "vertical-align": "middle", "border-color": "inherit"},
+    "td":         {"display": "table-cell", "padding": "1px", "vertical-align": "inherit", "text-align": "inherit"},
+    "template":   {"display": "none"},
+    "textarea":   {"display": "inline-block", "border": "1px solid", "padding": "2px", "font-family": "monospace", "white-space": "pre-wrap", "overflow": "auto", "resize": "both", "cursor": "text"},
+    "tfoot":      {"display": "table-footer-group", "vertical-align": "middle", "border-color": "inherit"},
+    "th":         {"display": "table-cell", "padding": "1px", "font-weight": "bold", "text-align": "center", "vertical-align": "inherit"},
+    "thead":      {"display": "table-header-group", "vertical-align": "middle", "border-color": "inherit"},
+    "time":       {"display": "inline"},
+    "title":      {"display": "none"},
+    "tr":         {"display": "table-row", "vertical-align": "inherit", "border-color": "inherit"},
+    "track":      {"display": "none"},
+    "u":          {"display": "inline", "text-decoration": "underline"},
+    "ul":         {"display": "block", "list-style-type": "disc", "margin-block": "1em", "padding-inline-start": "40px"},
+    "var":        {"display": "inline", "font-style": "italic"},
+    "video":      {"display": "inline", "object-fit": "contain"},  # replaced
+    "wbr":        {"display": "inline"},  # generates line break opportunity
+}
+
+# Formatting context established by parent
+PARENT_CONTEXT = {
+    "block":              "BFC (block formatting context)",
+    "inline":             "IFC (inline formatting context of ancestor BFC)",
+    "inline-block":       "BFC (establishes own BFC)",
+    "table":              "TFC (table formatting context)",
+    "table-row-group":    "TFC row-group context",
+    "table-header-group": "TFC row-group context",
+    "table-footer-group": "TFC row-group context",
+    "table-row":          "TFC row context",
+    "table-cell":         "BFC (cell establishes own BFC)",
+    "table-caption":      "BFC (caption establishes own BFC)",
+    "table-column-group": "TFC column-group context (no child layout)",
+    "table-column":       "TFC column context (no child layout)",
+    "flex":               "FFC (flex formatting context)",
+    "inline-flex":        "FFC (flex formatting context)",
+    "grid":               "GFC (grid formatting context)",
+    "inline-grid":        "GFC (grid formatting context)",
+    "list-item":          "BFC (block + marker box)",
+    "ruby":               "ruby formatting context",
+    "ruby-text":          "ruby-text context",
+    "contents":           "none (replaced by children in parent context)",
+    "none":               "none (no boxes generated)",
+}
+
+
+def css_str(element):
+    """Return compact CSS string for an element's UA defaults."""
+    styles = UA_STYLES.get(element, {})
+    if not styles:
+        return "display:inline"
+    parts = []
+    for prop, val in styles.items():
+        parts.append(f"{prop}:{val}")
+    return "; ".join(parts)
+
+
+def parent_context_str(element):
+    """Return the formatting context the parent establishes for children."""
+    styles = UA_STYLES.get(element, {})
+    display = styles.get("display", "inline")
+    return PARENT_CONTEXT.get(display, f"{display} context")
+
+
 # ─── Parent rule classification ───
 
 FLOW_PARENTS = {
@@ -628,10 +795,14 @@ def generate():
     lines = []
     lines.append("# HTML Element Nesting Pairs — Full Exhaustive List")
     lines.append("")
-    lines.append("Every individual parent → child pair on its own line.")
+    lines.append("Every individual parent → child pair on its own line, with UA default CSS.")
     lines.append(f"**{len(ALL_ELEMENTS)} elements × {len(ALL_ELEMENTS)} elements = {len(ALL_ELEMENTS)**2} pairs.**")
     lines.append("")
-    lines.append("Format: `parent → child = ACTION` — note")
+    lines.append("Format per entry:")
+    lines.append("```")
+    lines.append("N. `<parent> → <child>` = **ACTION** — behavior note")
+    lines.append("   parent CSS: {ua defaults}  |  child CSS: {ua defaults}  |  context: {formatting context}")
+    lines.append("```")
     lines.append("")
 
     # Stats
@@ -640,9 +811,13 @@ def generate():
 
     for parent in ALL_ELEMENTS:
         rule = get_parent_rule(parent)
+        p_css = css_str(parent)
+        p_ctx = parent_context_str(parent)
         lines.append("---")
         lines.append("")
         lines.append(f"## `<{parent}>` (rule: {rule})")
+        lines.append(f"UA default: `{p_css}`")
+        lines.append(f"Children context: {p_ctx}")
         lines.append("")
 
         for child in ALL_ELEMENTS:
@@ -650,7 +825,9 @@ def generate():
             action, behavior = get_action(parent, child)
             action_counts[action] = action_counts.get(action, 0) + 1
             desc = BEHAVIOR.get(behavior, behavior)
+            c_css = css_str(child)
             lines.append(f"{pair_num}. `<{parent}> → <{child}>` = **{action}** — {desc}")
+            lines.append(f"   parent CSS: `{p_css}` | child CSS: `{c_css}` | context: {p_ctx}")
 
         lines.append("")
 
