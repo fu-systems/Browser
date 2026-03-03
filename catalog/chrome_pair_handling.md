@@ -881,6 +881,56 @@ See `<table>` section above for full 116-child breakdown.
 
 All files under: `third_party/blink/renderer/core/html/parser/`
 
+### Verified Function Signatures (from source)
+
+| Function | Lines | Purpose |
+|----------|-------|---------|
+| `ProcessStartTagForInBody()` | 687–1104 | All start tag handling in InBody mode |
+| `ProcessEndTagForInBody()` | 1934–2102 | All end tag handling in InBody mode |
+| `ProcessCloseWhenNestedTag<IsLi>()` | 550–567 | `<li>` auto-close stack walk |
+| `ProcessCloseWhenNestedTag<IsDdOrDt>()` | 550–567 | `<dd>`/`<dt>` auto-close stack walk |
+| `ProcessFakePEndTagIfPInButtonScope()` | — | The `<p>`-closing check used by all block elements |
+| `CallTheAdoptionAgency()` | 1638–1758 | Formatting element tree restructuring |
+| `ProcessAnyOtherEndTagForInBody()` | 1618–1635 | Default end tag: walk stack for match |
+| `ProcessStartTagForInTable()` | — | InTable mode start tags |
+| `ProcessStartTagForInSelect()` | — | InSelect mode start tags |
+| `ProcessStartTagForInForeignContent()` | — | Foreign content breakout logic |
+
+### Chrome-Specific Implementation Details (Verified from Source)
+
+**1. Adoption agency hard limits:**
+```
+Outer iteration limit: 8
+Inner iteration limit: 3
+```
+If the tree restructuring exceeds these limits, Chrome stops. This prevents pathological
+markup from causing O(n²) parser behavior.
+
+**2. `<li>` stack walk skips `<address>`, `<div>`, `<p>`:**
+When Chrome walks the stack looking for an open `<li>` to auto-close, it normally stops
+at any "special node." But it makes exceptions for `<address>`, `<div>`, and `<p>` —
+these are not treated as stop boundaries. Same logic for `<dd>`/`<dt>`.
+
+**3. `<option>` and `<optgroup>` have dual InBody behavior:**
+When these tags arrive in InBody mode (not in InSelect), Chrome checks if `<select>` is
+in scope. If so, it generates implied end tags and does scope-aware handling. If not, they
+fall through to reconstruct-AFE + insert. This is relevant when `<option>` appears
+orphaned outside a `<select>`.
+
+**4. `<table>` quirks mode exception:**
+In quirks mode, `<table>` does NOT auto-close `<p>`. In standards/almost-standards mode,
+it does. This is the only tag where the `<p>`-closing behavior depends on the document's
+compat mode.
+
+**5. `<select>` nesting prevention:**
+When `<select>` start tag arrives and `<select>` is already in scope, Chrome auto-closes
+the existing `<select>` (parse error). New Chrome feature (`InputInSelectEnabled`) also
+allows `<input>` to auto-close `<select>` when in scope.
+
+**6. `<image>` → `<img>` rewriting:**
+Chrome rewrites `<image>` start tags to `<img>` (with comment: "Apparently we're not
+supposed to ask."). Not in our 116-element list but worth noting for robustness.
+
 ---
 
 ## Part 5 — Corrections to generate_nesting_pairs.py Model
