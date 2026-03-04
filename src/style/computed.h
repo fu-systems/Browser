@@ -93,12 +93,12 @@ typedef enum {
 /* ── Text Align ────────────────────────────────────────────────────── */
 
 typedef enum {
-    TA_LEFT,
-    TA_RIGHT,
-    TA_CENTER,
-    TA_JUSTIFY,
-    TA_START,
-    TA_END,
+    TEXT_ALIGN_LEFT,
+    TEXT_ALIGN_RIGHT,
+    TEXT_ALIGN_CENTER,
+    TEXT_ALIGN_JUSTIFY,
+    TEXT_ALIGN_START,
+    TEXT_ALIGN_END,
 } TextAlign;
 
 /* ── White Space ───────────────────────────────────────────────────── */
@@ -139,16 +139,16 @@ typedef enum {
 /* ── Border Style ──────────────────────────────────────────────────── */
 
 typedef enum {
-    BS_NONE,
-    BS_HIDDEN,
-    BS_SOLID,
-    BS_DASHED,
-    BS_DOTTED,
-    BS_DOUBLE,
-    BS_GROOVE,
-    BS_RIDGE,
-    BS_INSET,
-    BS_OUTSET,
+    BORDER_NONE,
+    BORDER_HIDDEN,
+    BORDER_SOLID,
+    BORDER_DASHED,
+    BORDER_DOTTED,
+    BORDER_DOUBLE,
+    BORDER_GROOVE,
+    BORDER_RIDGE,
+    BORDER_INSET,
+    BORDER_OUTSET,
 } BorderStyle;
 
 /* ── Edge Values ───────────────────────────────────────────────────── */

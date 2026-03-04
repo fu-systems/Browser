@@ -43,7 +43,7 @@ Specificity selector_specificity(const Selector *sel)
 
 static bool has_class(const DomNode *elem, const char *cls)
 {
-    if (elem->type != NODE_ELEMENT || !elem->elem.class_str) return false;
+    if (elem->type != PANE_NODE_ELEMENT || !elem->elem.class_str) return false;
     const char *s = elem->elem.class_str;
     size_t cls_len = strlen(cls);
     while (*s) {
@@ -58,7 +58,7 @@ static bool has_class(const DomNode *elem, const char *cls)
 
 static bool match_compound(const CompoundSelector *cs, const DomNode *elem)
 {
-    if (elem->type != NODE_ELEMENT) return false;
+    if (elem->type != PANE_NODE_ELEMENT) return false;
 
     for (int i = 0; i < cs->part_count; i++) {
         const SelectorPart *p = &cs->parts[i];
@@ -135,7 +135,7 @@ bool selector_matches(const Selector *sel, const DomNode *elem)
         case COMB_DESCENDANT:
             node = node->parent;
             while (node) {
-                if (node->type == NODE_ELEMENT &&
+                if (node->type == PANE_NODE_ELEMENT &&
                     match_compound(&sel->compounds[idx], node)) {
                     found = true;
                     break;
@@ -146,7 +146,7 @@ bool selector_matches(const Selector *sel, const DomNode *elem)
 
         case COMB_CHILD:
             node = node->parent;
-            if (node && node->type == NODE_ELEMENT &&
+            if (node && node->type == PANE_NODE_ELEMENT &&
                 match_compound(&sel->compounds[idx], node))
                 found = true;
             break;
@@ -154,7 +154,7 @@ bool selector_matches(const Selector *sel, const DomNode *elem)
         case COMB_NEXT_SIBLING:
             node = node->prev_sibling;
             /* Skip non-element siblings. */
-            while (node && node->type != NODE_ELEMENT)
+            while (node && node->type != PANE_NODE_ELEMENT)
                 node = node->prev_sibling;
             if (node && match_compound(&sel->compounds[idx], node))
                 found = true;
@@ -163,7 +163,7 @@ bool selector_matches(const Selector *sel, const DomNode *elem)
         case COMB_SUBSEQUENT:
             node = node->prev_sibling;
             while (node) {
-                if (node->type == NODE_ELEMENT &&
+                if (node->type == PANE_NODE_ELEMENT &&
                     match_compound(&sel->compounds[idx], node)) {
                     found = true;
                     break;

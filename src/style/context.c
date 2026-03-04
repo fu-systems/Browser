@@ -29,7 +29,7 @@ PairwiseContext context_initial(float viewport_w, float viewport_h)
         .font_size = 16.0f,
         .line_height = 1.2f,
         .color = {0, 0, 0, 255},
-        .text_align = TA_START,
+        .text_align = TEXT_ALIGN_START,
         .white_space = WS_NORMAL,
         .visibility = VIS_VISIBLE,
         .available_width = viewport_w,
@@ -201,7 +201,7 @@ PairwiseContext context_transition(const PairwiseContext *parent_ctx,
     /* Rule: The child element's display determines what formatting
      * context its OWN children see. */
 
-    HtmlTag tag = (child->type == NODE_ELEMENT) ? child->elem.tag : TAG_UNKNOWN;
+    HtmlTag tag = (child->type == PANE_NODE_ELEMENT) ? child->elem.tag : TAG_UNKNOWN;
 
     /* Element-based FC overrides (SVG, MathML). */
     if (tag == TAG_SVG) {

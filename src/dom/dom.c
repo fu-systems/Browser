@@ -106,7 +106,7 @@ Document *doc_create(void)
     strintern_init(&doc->strings);
 
     doc->root = arena_calloc(&doc->arena, 1, sizeof(DomNode));
-    doc->root->type = NODE_DOCUMENT;
+    doc->root->type = PANE_NODE_DOCUMENT;
     return doc;
 }
 
@@ -123,7 +123,7 @@ void doc_destroy(Document *doc)
 DomNode *doc_create_element(Document *doc, HtmlTag tag, const char *tag_name)
 {
     DomNode *n = arena_calloc(&doc->arena, 1, sizeof(DomNode));
-    n->type = NODE_ELEMENT;
+    n->type = PANE_NODE_ELEMENT;
     n->elem.tag = tag;
     n->elem.tag_name = strintern_cstr(&doc->strings,
                                        tag_name ? tag_name : html_tag_to_name(tag));
@@ -133,7 +133,7 @@ DomNode *doc_create_element(Document *doc, HtmlTag tag, const char *tag_name)
 DomNode *doc_create_text(Document *doc, const char *data, size_t len)
 {
     DomNode *n = arena_calloc(&doc->arena, 1, sizeof(DomNode));
-    n->type = NODE_TEXT;
+    n->type = PANE_NODE_TEXT;
     n->text.data = arena_strndup(&doc->arena, data, len);
     n->text.len = len;
     return n;
@@ -142,7 +142,7 @@ DomNode *doc_create_text(Document *doc, const char *data, size_t len)
 DomNode *doc_create_comment(Document *doc, const char *data, size_t len)
 {
     DomNode *n = arena_calloc(&doc->arena, 1, sizeof(DomNode));
-    n->type = NODE_COMMENT;
+    n->type = PANE_NODE_COMMENT;
     n->text.data = arena_strndup(&doc->arena, data, len);
     n->text.len = len;
     return n;
@@ -151,7 +151,7 @@ DomNode *doc_create_comment(Document *doc, const char *data, size_t len)
 DomNode *doc_create_doctype(Document *doc, const char *name)
 {
     DomNode *n = arena_calloc(&doc->arena, 1, sizeof(DomNode));
-    n->type = NODE_DOCTYPE;
+    n->type = PANE_NODE_DOCTYPE;
     n->doctype.name = arena_strdup(&doc->arena, name ? name : "html");
     return n;
 }
@@ -216,7 +216,7 @@ void dom_remove_child(DomNode *parent, DomNode *child)
 void elem_set_attr(Document *doc, DomNode *elem,
                    const char *name, const char *value)
 {
-    if (elem->type != NODE_ELEMENT) return;
+    if (elem->type != PANE_NODE_ELEMENT) return;
 
     const char *iname = strintern_cstr(&doc->strings, name);
     const char *ival  = arena_strdup(&doc->arena, value);
@@ -249,7 +249,7 @@ update_shortcuts:
 
 const char *elem_get_attr(const DomNode *elem, const char *name)
 {
-    if (elem->type != NODE_ELEMENT) return NULL;
+    if (elem->type != PANE_NODE_ELEMENT) return NULL;
     for (uint16_t i = 0; i < elem->elem.attr_count; i++) {
         if (strcmp(elem->elem.attrs[i].name, name) == 0)
             return elem->elem.attrs[i].value;

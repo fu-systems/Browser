@@ -257,7 +257,7 @@ static LayoutBox *build_layout_box(Document *doc,
     if (!node) return NULL;
 
     /* Text nodes. */
-    if (node->type == NODE_TEXT) {
+    if (node->type == PANE_NODE_TEXT) {
         if (!node->text.data || node->text.len == 0) return NULL;
 
         /* Skip whitespace-only text in block contexts. */
@@ -282,7 +282,7 @@ static LayoutBox *build_layout_box(Document *doc,
     }
 
     /* Skip non-element nodes. */
-    if (node->type != NODE_ELEMENT) return NULL;
+    if (node->type != PANE_NODE_ELEMENT) return NULL;
 
     /* ── 1. Cascade: collect matching declarations ─────────────── */
 

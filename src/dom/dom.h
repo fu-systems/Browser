@@ -16,11 +16,11 @@
 /* ── Node Types ─────────────────────────────────────────────────────── */
 
 typedef enum {
-    NODE_DOCUMENT,
-    NODE_DOCTYPE,
-    NODE_ELEMENT,
-    NODE_TEXT,
-    NODE_COMMENT,
+    PANE_NODE_DOCUMENT,
+    PANE_NODE_DOCTYPE,
+    PANE_NODE_ELEMENT,
+    PANE_NODE_TEXT,
+    PANE_NODE_COMMENT,
 } NodeType;
 
 /* ── HTML Tag IDs ───────────────────────────────────────────────────── */
@@ -90,7 +90,7 @@ struct DomNode {
     uint32_t     child_count;
 
     union {
-        struct {               /* NODE_ELEMENT */
+        struct {               /* PANE_NODE_ELEMENT */
             HtmlTag      tag;
             const char  *tag_name;   /* interned, lowercase */
             Attr        *attrs;
@@ -99,11 +99,11 @@ struct DomNode {
             const char  *id;         /* shortcut to id attr value */
             const char  *class_str;  /* shortcut to class attr value */
         } elem;
-        struct {               /* NODE_TEXT / NODE_COMMENT */
+        struct {               /* PANE_NODE_TEXT / PANE_NODE_COMMENT */
             char   *data;
             size_t  len;
         } text;
-        struct {               /* NODE_DOCTYPE */
+        struct {               /* PANE_NODE_DOCTYPE */
             const char *name;
         } doctype;
     };
@@ -118,7 +118,7 @@ struct DomNode {
 typedef struct {
     Arena      arena;
     StrIntern  strings;
-    DomNode   *root;          /* NODE_DOCUMENT node */
+    DomNode   *root;          /* PANE_NODE_DOCUMENT node */
     DomNode   *html;          /* <html> element */
     DomNode   *head;          /* <head> element */
     DomNode   *body;          /* <body> element */

@@ -80,7 +80,7 @@ static void dump_layout_tree(const LayoutBox *box, int depth)
            box->rect.x, box->rect.y,
            box->rect.width, box->rect.height);
 
-    if (box->node && box->node->type == NODE_ELEMENT) {
+    if (box->node && box->node->type == PANE_NODE_ELEMENT) {
         printf("  <%s", html_tag_to_name(box->node->elem.tag));
         if (box->node->elem.id)
             printf(" id=\"%s\"", box->node->elem.id);

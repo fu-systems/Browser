@@ -125,9 +125,9 @@ static void load_page(const char *html, size_t len)
     if (g.result.document && g.result.document->head) {
         DomNode *head = g.result.document->head;
         for (DomNode *n = head->first_child; n; n = n->next_sibling) {
-            if (n->type == NODE_ELEMENT && n->elem.tag == TAG_TITLE) {
+            if (n->type == PANE_NODE_ELEMENT && n->elem.tag == TAG_TITLE) {
                 DomNode *tc = n->first_child;
-                if (tc && tc->type == NODE_TEXT && tc->text.data) {
+                if (tc && tc->type == PANE_NODE_TEXT && tc->text.data) {
                     char title[512];
                     int tlen = tc->text.len < 255 ? (int)tc->text.len : 255;
                     snprintf(title, sizeof(title), "%.*s - Pane", tlen, tc->text.data);

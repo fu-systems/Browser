@@ -26,15 +26,15 @@ static ComputedStyle initial_style = {
     .bottom         = { .type = VAL_AUTO },
     .left           = { .type = VAL_AUTO },
     .box_sizing     = BOX_CONTENT_BOX,
-    .border_top_style    = BS_NONE,
-    .border_right_style  = BS_NONE,
-    .border_bottom_style = BS_NONE,
-    .border_left_style   = BS_NONE,
+    .border_top_style    = BORDER_NONE,
+    .border_right_style  = BORDER_NONE,
+    .border_bottom_style = BORDER_NONE,
+    .border_left_style   = BORDER_NONE,
     .background_color = {0, 0, 0, 0},
     .font_size      = 16.0f,
     .line_height    = 1.2f,
     .color          = {0, 0, 0, 255},
-    .text_align     = TA_START,
+    .text_align     = TEXT_ALIGN_START,
     .white_space    = WS_NORMAL,
     .font_family    = "serif",
     .font_weight    = 400,
@@ -197,14 +197,14 @@ static Visibility parse_visibility(const CssValue *val)
 
 static TextAlign parse_text_align(const CssValue *val)
 {
-    if (!val || val->type != VAL_KEYWORD || !val->string) return TA_START;
+    if (!val || val->type != VAL_KEYWORD || !val->string) return TEXT_ALIGN_START;
     const char *s = val->string;
-    if (strcmp(s, "left") == 0)    return TA_LEFT;
-    if (strcmp(s, "right") == 0)   return TA_RIGHT;
-    if (strcmp(s, "center") == 0)  return TA_CENTER;
-    if (strcmp(s, "justify") == 0) return TA_JUSTIFY;
-    if (strcmp(s, "end") == 0)     return TA_END;
-    return TA_START;
+    if (strcmp(s, "left") == 0)    return TEXT_ALIGN_LEFT;
+    if (strcmp(s, "right") == 0)   return TEXT_ALIGN_RIGHT;
+    if (strcmp(s, "center") == 0)  return TEXT_ALIGN_CENTER;
+    if (strcmp(s, "justify") == 0) return TEXT_ALIGN_JUSTIFY;
+    if (strcmp(s, "end") == 0)     return TEXT_ALIGN_END;
+    return TEXT_ALIGN_START;
 }
 
 static WhiteSpace parse_white_space(const CssValue *val)
@@ -228,18 +228,18 @@ static BoxSizing parse_box_sizing(const CssValue *val)
 
 static BorderStyle parse_border_style(const CssValue *val)
 {
-    if (!val || val->type != VAL_KEYWORD || !val->string) return BS_NONE;
+    if (!val || val->type != VAL_KEYWORD || !val->string) return BORDER_NONE;
     const char *s = val->string;
-    if (strcmp(s, "solid") == 0)  return BS_SOLID;
-    if (strcmp(s, "dashed") == 0) return BS_DASHED;
-    if (strcmp(s, "dotted") == 0) return BS_DOTTED;
-    if (strcmp(s, "double") == 0) return BS_DOUBLE;
-    if (strcmp(s, "groove") == 0) return BS_GROOVE;
-    if (strcmp(s, "ridge") == 0)  return BS_RIDGE;
-    if (strcmp(s, "inset") == 0)  return BS_INSET;
-    if (strcmp(s, "outset") == 0) return BS_OUTSET;
-    if (strcmp(s, "hidden") == 0) return BS_HIDDEN;
-    return BS_NONE;
+    if (strcmp(s, "solid") == 0)  return BORDER_SOLID;
+    if (strcmp(s, "dashed") == 0) return BORDER_DASHED;
+    if (strcmp(s, "dotted") == 0) return BORDER_DOTTED;
+    if (strcmp(s, "double") == 0) return BORDER_DOUBLE;
+    if (strcmp(s, "groove") == 0) return BORDER_GROOVE;
+    if (strcmp(s, "ridge") == 0)  return BORDER_RIDGE;
+    if (strcmp(s, "inset") == 0)  return BORDER_INSET;
+    if (strcmp(s, "outset") == 0) return BORDER_OUTSET;
+    if (strcmp(s, "hidden") == 0) return BORDER_HIDDEN;
+    return BORDER_NONE;
 }
 
 static FlexDirection parse_flex_direction(const CssValue *val)
@@ -376,7 +376,7 @@ void computed_style_resolve(ComputedStyle *style,
     style->z_index        = (CssValue){ .type = VAL_AUTO };
     style->has_transform  = false;
     style->border_top_style = style->border_right_style =
-        style->border_bottom_style = style->border_left_style = BS_NONE;
+        style->border_bottom_style = style->border_left_style = BORDER_NONE;
 
     if (!cascade) return;
 
@@ -613,8 +613,8 @@ void computed_style_resolve(ComputedStyle *style,
     }
 
     /* Border widths are 0 if style is none. */
-    if (style->border_top_style == BS_NONE) style->border_width.top = 0;
-    if (style->border_right_style == BS_NONE) style->border_width.right = 0;
-    if (style->border_bottom_style == BS_NONE) style->border_width.bottom = 0;
-    if (style->border_left_style == BS_NONE) style->border_width.left = 0;
+    if (style->border_top_style == BORDER_NONE) style->border_width.top = 0;
+    if (style->border_right_style == BORDER_NONE) style->border_width.right = 0;
+    if (style->border_bottom_style == BORDER_NONE) style->border_width.bottom = 0;
+    if (style->border_left_style == BORDER_NONE) style->border_width.left = 0;
 }

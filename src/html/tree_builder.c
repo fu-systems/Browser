@@ -133,7 +133,7 @@ static DomNode *pop_element(TreeBuilder *tb)
 static bool stack_has_tag(TreeBuilder *tb, HtmlTag tag)
 {
     for (int i = tb->stack_len - 1; i >= 0; i--) {
-        if (tb->stack[i]->type == NODE_ELEMENT &&
+        if (tb->stack[i]->type == PANE_NODE_ELEMENT &&
             tb->stack[i]->elem.tag == tag)
             return true;
     }
@@ -144,7 +144,7 @@ static bool has_element_in_scope(TreeBuilder *tb, HtmlTag tag)
 {
     for (int i = tb->stack_len - 1; i >= 0; i--) {
         DomNode *n = tb->stack[i];
-        if (n->type != NODE_ELEMENT) continue;
+        if (n->type != PANE_NODE_ELEMENT) continue;
         if (n->elem.tag == tag) return true;
         /* Scope boundary elements. */
         switch (n->elem.tag) {
@@ -162,7 +162,7 @@ static bool has_p_in_button_scope(TreeBuilder *tb)
 {
     for (int i = tb->stack_len - 1; i >= 0; i--) {
         DomNode *n = tb->stack[i];
-        if (n->type != NODE_ELEMENT) continue;
+        if (n->type != PANE_NODE_ELEMENT) continue;
         if (n->elem.tag == TAG_P) return true;
         if (n->elem.tag == TAG_BUTTON) return false;
         switch (n->elem.tag) {
@@ -180,7 +180,7 @@ static void pop_until_tag(TreeBuilder *tb, HtmlTag tag)
 {
     while (tb->stack_len > 0) {
         DomNode *n = pop_element(tb);
-        if (n->type == NODE_ELEMENT && n->elem.tag == tag)
+        if (n->type == PANE_NODE_ELEMENT && n->elem.tag == tag)
             return;
     }
 }
@@ -195,7 +195,7 @@ static void generate_implied_end_tags(TreeBuilder *tb, HtmlTag except)
 {
     while (tb->stack_len > 0) {
         DomNode *n = current_node(tb);
-        if (n->type != NODE_ELEMENT) break;
+        if (n->type != PANE_NODE_ELEMENT) break;
         HtmlTag t = n->elem.tag;
         if (t == except) break;
         if (t == TAG_DD || t == TAG_DT || t == TAG_LI || t == TAG_OPTGROUP ||
@@ -245,7 +245,7 @@ static void insert_text(TreeBuilder *tb, const char *data, size_t len)
     DomNode *target = appropriate_place(tb);
 
     /* Merge with previous text node if possible. */
-    if (target->last_child && target->last_child->type == NODE_TEXT) {
+    if (target->last_child && target->last_child->type == PANE_NODE_TEXT) {
         DomNode *text = target->last_child;
         size_t new_len = text->text.len + len;
         char *new_data = arena_alloc(&tb->doc->arena, new_len + 1, 1);
@@ -566,7 +566,7 @@ static void handle_in_body(TreeBuilder *tb, HtmlToken *tok)
         if (is_heading(tag)) {
             close_p_element(tb);
             /* If current is a heading, close it. */
-            if (current_node(tb)->type == NODE_ELEMENT &&
+            if (current_node(tb)->type == PANE_NODE_ELEMENT &&
                 is_heading(current_node(tb)->elem.tag)) {
                 pop_element(tb);
             }
@@ -598,12 +598,12 @@ static void handle_in_body(TreeBuilder *tb, HtmlToken *tok)
             tb->frameset_ok = false;
             for (int i = tb->stack_len - 1; i >= 0; i--) {
                 DomNode *n = tb->stack[i];
-                if (n->type == NODE_ELEMENT && n->elem.tag == TAG_LI) {
+                if (n->type == PANE_NODE_ELEMENT && n->elem.tag == TAG_LI) {
                     generate_implied_end_tags(tb, TAG_LI);
                     pop_until_tag(tb, TAG_LI);
                     break;
                 }
-                if (n->type == NODE_ELEMENT && is_special(n->elem.tag) &&
+                if (n->type == PANE_NODE_ELEMENT && is_special(n->elem.tag) &&
                     n->elem.tag != TAG_ADDRESS && n->elem.tag != TAG_DIV &&
                     n->elem.tag != TAG_P)
                     break;
@@ -618,7 +618,7 @@ static void handle_in_body(TreeBuilder *tb, HtmlToken *tok)
             tb->frameset_ok = false;
             for (int i = tb->stack_len - 1; i >= 0; i--) {
                 DomNode *n = tb->stack[i];
-                if (n->type != NODE_ELEMENT) continue;
+                if (n->type != PANE_NODE_ELEMENT) continue;
                 if (n->elem.tag == TAG_DD || n->elem.tag == TAG_DT) {
                     generate_implied_end_tags(tb, n->elem.tag);
                     pop_until_tag(tb, n->elem.tag);
@@ -756,7 +756,7 @@ static void handle_in_body(TreeBuilder *tb, HtmlToken *tok)
                 pop_until_tag(tb, tag);
                 /* Remove from AFE. */
                 for (int i = tb->afe_len - 1; i >= 0; i--) {
-                    if (tb->afe[i] && tb->afe[i]->type == NODE_ELEMENT &&
+                    if (tb->afe[i] && tb->afe[i]->type == PANE_NODE_ELEMENT &&
                         tb->afe[i]->elem.tag == tag) {
                         memmove(&tb->afe[i], &tb->afe[i+1],
                                 (tb->afe_len - i - 1) * sizeof(DomNode *));
@@ -814,14 +814,14 @@ static void handle_in_body(TreeBuilder *tb, HtmlToken *tok)
         /* Any other end tag: walk stack, pop matching element. */
         for (int i = tb->stack_len - 1; i >= 0; i--) {
             DomNode *n = tb->stack[i];
-            if (n->type == NODE_ELEMENT && n->elem.tag == tag) {
+            if (n->type == PANE_NODE_ELEMENT && n->elem.tag == tag) {
                 generate_implied_end_tags(tb, tag);
                 while (tb->stack_len > 0 && tb->stack[tb->stack_len - 1] != n)
                     pop_element(tb);
                 pop_element(tb);
                 return;
             }
-            if (n->type == NODE_ELEMENT && is_special(n->elem.tag))
+            if (n->type == PANE_NODE_ELEMENT && is_special(n->elem.tag))
                 return; /* Stop if we hit a special element. */
         }
     }
@@ -894,7 +894,7 @@ static void handle_in_table(TreeBuilder *tb, HtmlToken *tok)
                 pop_until_tag(tb, TAG_TABLE);
                 /* Reset mode based on current node. */
                 DomNode *cn = current_node(tb);
-                if (cn->type == NODE_ELEMENT)
+                if (cn->type == PANE_NODE_ELEMENT)
                     tb->mode = mode_for_tag(cn->elem.tag);
                 else
                     tb->mode = MODE_IN_BODY;
@@ -913,7 +913,7 @@ static void handle_in_table(TreeBuilder *tb, HtmlToken *tok)
             if (!has_element_in_scope(tb, TAG_TABLE)) return;
             pop_until_tag(tb, TAG_TABLE);
             DomNode *cn = current_node(tb);
-            if (cn->type == NODE_ELEMENT)
+            if (cn->type == PANE_NODE_ELEMENT)
                 tb->mode = mode_for_tag(cn->elem.tag);
             else
                 tb->mode = MODE_IN_BODY;
@@ -946,7 +946,7 @@ static void handle_in_table_body(TreeBuilder *tb, HtmlToken *tok)
 
         /* TB-03: caption, colgroup, thead, tbody, tfoot → close current tbody */
         if (tag == TAG_CAPTION || tag == TAG_COLGROUP || is_table_body(tag)) {
-            HtmlTag cur = current_node(tb)->type == NODE_ELEMENT ?
+            HtmlTag cur = current_node(tb)->type == PANE_NODE_ELEMENT ?
                           current_node(tb)->elem.tag : TAG_UNKNOWN;
             if (is_table_body(cur)) pop_element(tb);
             tb->mode = MODE_IN_TABLE;
@@ -965,7 +965,7 @@ static void handle_in_table_body(TreeBuilder *tb, HtmlToken *tok)
         }
 
         if (tag == TAG_TABLE) {
-            HtmlTag cur = current_node(tb)->type == NODE_ELEMENT ?
+            HtmlTag cur = current_node(tb)->type == PANE_NODE_ELEMENT ?
                           current_node(tb)->elem.tag : TAG_UNKNOWN;
             if (is_table_body(cur)) pop_element(tb);
             tb->mode = MODE_IN_TABLE;
@@ -994,7 +994,7 @@ static void handle_in_row(TreeBuilder *tb, HtmlToken *tok)
         /* IR-02: tr, caption, colgroup, thead, tbody, tfoot → close row */
         if (tag == TAG_TR || tag == TAG_CAPTION || tag == TAG_COLGROUP ||
             is_table_body(tag)) {
-            if (current_node(tb)->type == NODE_ELEMENT &&
+            if (current_node(tb)->type == PANE_NODE_ELEMENT &&
                 current_node(tb)->elem.tag == TAG_TR)
                 pop_element(tb);
             tb->mode = MODE_IN_TABLE_BODY;
@@ -1013,7 +1013,7 @@ static void handle_in_row(TreeBuilder *tb, HtmlToken *tok)
         }
 
         if (tag == TAG_TABLE) {
-            if (current_node(tb)->type == NODE_ELEMENT &&
+            if (current_node(tb)->type == PANE_NODE_ELEMENT &&
                 current_node(tb)->elem.tag == TAG_TR)
                 pop_element(tb);
             tb->mode = MODE_IN_TABLE_BODY;
@@ -1022,7 +1022,7 @@ static void handle_in_row(TreeBuilder *tb, HtmlToken *tok)
         }
 
         if (is_table_body(tag)) {
-            if (current_node(tb)->type == NODE_ELEMENT &&
+            if (current_node(tb)->type == PANE_NODE_ELEMENT &&
                 current_node(tb)->elem.tag == TAG_TR)
                 pop_element(tb);
             tb->mode = MODE_IN_TABLE_BODY;
@@ -1054,7 +1054,7 @@ static void handle_in_cell(TreeBuilder *tb, HtmlToken *tok)
             HtmlTag cell = TAG_UNKNOWN;
             for (int i = tb->stack_len - 1; i >= 0; i--) {
                 DomNode *n = tb->stack[i];
-                if (n->type == NODE_ELEMENT &&
+                if (n->type == PANE_NODE_ELEMENT &&
                     (n->elem.tag == TAG_TD || n->elem.tag == TAG_TH)) {
                     cell = n->elem.tag;
                     break;
@@ -1081,7 +1081,7 @@ static void handle_in_cell(TreeBuilder *tb, HtmlToken *tok)
             HtmlTag cell = TAG_UNKNOWN;
             for (int i = tb->stack_len - 1; i >= 0; i--) {
                 DomNode *n = tb->stack[i];
-                if (n->type == NODE_ELEMENT &&
+                if (n->type == PANE_NODE_ELEMENT &&
                     (n->elem.tag == TAG_TD || n->elem.tag == TAG_TH)) {
                     cell = n->elem.tag;
                     break;
@@ -1173,7 +1173,7 @@ static void handle_in_column_group(TreeBuilder *tb, HtmlToken *tok)
     if (tok->type == TOK_END_TAG) {
         HtmlTag tag = html_tag_from_name(tok->tag_name, tok->tag_name_len);
         if (tag == TAG_COLGROUP) {
-            if (current_node(tb)->type == NODE_ELEMENT &&
+            if (current_node(tb)->type == PANE_NODE_ELEMENT &&
                 current_node(tb)->elem.tag == TAG_COLGROUP)
                 pop_element(tb);
             tb->mode = MODE_IN_TABLE;
@@ -1183,7 +1183,7 @@ static void handle_in_column_group(TreeBuilder *tb, HtmlToken *tok)
     }
 
     /* Close colgroup, reprocess in table mode. */
-    if (current_node(tb)->type == NODE_ELEMENT &&
+    if (current_node(tb)->type == PANE_NODE_ELEMENT &&
         current_node(tb)->elem.tag == TAG_COLGROUP)
         pop_element(tb);
     tb->mode = MODE_IN_TABLE;
@@ -1206,27 +1206,27 @@ static void handle_in_select(TreeBuilder *tb, HtmlToken *tok)
         HtmlTag tag = html_tag_from_name(tok->tag_name, tok->tag_name_len);
 
         if (tag == TAG_OPTION) {
-            if (current_node(tb)->type == NODE_ELEMENT &&
+            if (current_node(tb)->type == PANE_NODE_ELEMENT &&
                 current_node(tb)->elem.tag == TAG_OPTION)
                 pop_element(tb);
             insert_element_for_token(tb, tok);
             return;
         }
         if (tag == TAG_OPTGROUP) {
-            if (current_node(tb)->type == NODE_ELEMENT &&
+            if (current_node(tb)->type == PANE_NODE_ELEMENT &&
                 current_node(tb)->elem.tag == TAG_OPTION)
                 pop_element(tb);
-            if (current_node(tb)->type == NODE_ELEMENT &&
+            if (current_node(tb)->type == PANE_NODE_ELEMENT &&
                 current_node(tb)->elem.tag == TAG_OPTGROUP)
                 pop_element(tb);
             insert_element_for_token(tb, tok);
             return;
         }
         if (tag == TAG_HR) {
-            if (current_node(tb)->type == NODE_ELEMENT &&
+            if (current_node(tb)->type == PANE_NODE_ELEMENT &&
                 current_node(tb)->elem.tag == TAG_OPTION)
                 pop_element(tb);
-            if (current_node(tb)->type == NODE_ELEMENT &&
+            if (current_node(tb)->type == PANE_NODE_ELEMENT &&
                 current_node(tb)->elem.tag == TAG_OPTGROUP)
                 pop_element(tb);
             insert_element_for_token(tb, tok);
@@ -1236,7 +1236,7 @@ static void handle_in_select(TreeBuilder *tb, HtmlToken *tok)
         if (tag == TAG_SELECT) {
             pop_until_tag(tb, TAG_SELECT);
             DomNode *cn = current_node(tb);
-            if (cn->type == NODE_ELEMENT)
+            if (cn->type == PANE_NODE_ELEMENT)
                 tb->mode = mode_for_tag(cn->elem.tag);
             else
                 tb->mode = MODE_IN_BODY;
@@ -1245,7 +1245,7 @@ static void handle_in_select(TreeBuilder *tb, HtmlToken *tok)
         if (tag == TAG_INPUT || tag == TAG_TEXTAREA) {
             pop_until_tag(tb, TAG_SELECT);
             DomNode *cn = current_node(tb);
-            if (cn->type == NODE_ELEMENT)
+            if (cn->type == PANE_NODE_ELEMENT)
                 tb->mode = mode_for_tag(cn->elem.tag);
             else
                 tb->mode = MODE_IN_BODY;
@@ -1258,19 +1258,19 @@ static void handle_in_select(TreeBuilder *tb, HtmlToken *tok)
     if (tok->type == TOK_END_TAG) {
         HtmlTag tag = html_tag_from_name(tok->tag_name, tok->tag_name_len);
         if (tag == TAG_OPTGROUP) {
-            if (current_node(tb)->type == NODE_ELEMENT &&
+            if (current_node(tb)->type == PANE_NODE_ELEMENT &&
                 current_node(tb)->elem.tag == TAG_OPTION &&
                 tb->stack_len >= 2 &&
-                tb->stack[tb->stack_len-2]->type == NODE_ELEMENT &&
+                tb->stack[tb->stack_len-2]->type == PANE_NODE_ELEMENT &&
                 tb->stack[tb->stack_len-2]->elem.tag == TAG_OPTGROUP)
                 pop_element(tb);
-            if (current_node(tb)->type == NODE_ELEMENT &&
+            if (current_node(tb)->type == PANE_NODE_ELEMENT &&
                 current_node(tb)->elem.tag == TAG_OPTGROUP)
                 pop_element(tb);
             return;
         }
         if (tag == TAG_OPTION) {
-            if (current_node(tb)->type == NODE_ELEMENT &&
+            if (current_node(tb)->type == PANE_NODE_ELEMENT &&
                 current_node(tb)->elem.tag == TAG_OPTION)
                 pop_element(tb);
             return;
@@ -1279,7 +1279,7 @@ static void handle_in_select(TreeBuilder *tb, HtmlToken *tok)
             if (!has_element_in_scope(tb, TAG_SELECT)) return;
             pop_until_tag(tb, TAG_SELECT);
             DomNode *cn = current_node(tb);
-            if (cn->type == NODE_ELEMENT)
+            if (cn->type == PANE_NODE_ELEMENT)
                 tb->mode = mode_for_tag(cn->elem.tag);
             else
                 tb->mode = MODE_IN_BODY;

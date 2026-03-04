@@ -181,9 +181,9 @@ static void render_page(BrowserWindow *bw, const char *html, size_t len,
         if (tab->result.document && tab->result.document->head) {
             DomNode *head = tab->result.document->head;
             for (DomNode *n = head->first_child; n; n = n->next_sibling) {
-                if (n->type == NODE_ELEMENT && n->elem.tag == TAG_TITLE) {
+                if (n->type == PANE_NODE_ELEMENT && n->elem.tag == TAG_TITLE) {
                     DomNode *tc = n->first_child;
-                    if (tc && tc->type == NODE_TEXT && tc->text.data) {
+                    if (tc && tc->type == PANE_NODE_TEXT && tc->text.data) {
                         size_t tlen = tc->text.len < 255 ? tc->text.len : 255;
                         memcpy(tab->title, tc->text.data, tlen);
                         tab->title[tlen] = '\0';

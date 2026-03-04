@@ -30,9 +30,9 @@ PaneResult pane_render(const char *html, size_t html_len,
     Stylesheet *inline_ss = NULL;
     if (result.document->head) {
         for (DomNode *n = result.document->head->first_child; n; n = n->next_sibling) {
-            if (n->type == NODE_ELEMENT && n->elem.tag == TAG_STYLE) {
+            if (n->type == PANE_NODE_ELEMENT && n->elem.tag == TAG_STYLE) {
                 DomNode *text = n->first_child;
-                if (text && text->type == NODE_TEXT && text->text.data) {
+                if (text && text->type == PANE_NODE_TEXT && text->text.data) {
                     inline_ss = css_parse_stylesheet(text->text.data, text->text.len);
                 }
             }
