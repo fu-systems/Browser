@@ -6,6 +6,7 @@
 
 #include "browser.h"
 #include "../html/tree_builder.h"
+#include "../net/http.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -92,7 +93,7 @@ static const char *ERROR_PAGE_FMT =
     "</head><body>\n"
     "  <h1>Page Load Error</h1>\n"
     "  <p>Could not load: <span class=\"url\">%s</span></p>\n"
-    "  <p>Pane currently supports local HTML files and inline HTML.</p>\n"
+    "  <p>%s</p>\n"
     "</body></html>\n";
 
 /* ── Utility ───────────────────────────────────────────────────────── */
@@ -238,7 +239,7 @@ void browser_navigate(BrowserWindow *bw, const char *url)
         FILE *f = fopen(path, "rb");
         if (!f) {
             char err[4096];
-            snprintf(err, sizeof(err), ERROR_PAGE_FMT, url);
+            snprintf(err, sizeof(err), ERROR_PAGE_FMT, url, "File not found.");
             render_page(bw, err, strlen(err), "Error");
             update_nav_buttons(bw);
             return;
@@ -262,9 +263,56 @@ void browser_navigate(BrowserWindow *bw, const char *url)
         return;
     }
 
+    /* HTTP / HTTPS URLs. */
+    if (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0) {
+        /* Update status bar. */
+        gtk_label_set_text(GTK_LABEL(bw->status_bar), "Loading...");
+
+        /* Process pending GTK events to show "Loading..." immediately. */
+        while (gtk_events_pending()) gtk_main_iteration();
+
+        HttpResponse *resp = http_get(url, 5);
+
+        if (resp->error) {
+            char err[4096];
+            snprintf(err, sizeof(err), ERROR_PAGE_FMT, url, resp->error);
+            tab_push_history(tab, url);
+            render_page(bw, err, strlen(err), "Error");
+            gtk_label_set_text(GTK_LABEL(bw->status_bar), "Error");
+        } else if (resp->body && resp->body_len > 0) {
+            tab_push_history(tab, url);
+            render_page(bw, resp->body, resp->body_len, NULL);
+
+            char status_msg[256];
+            snprintf(status_msg, sizeof(status_msg),
+                     "HTTP %d — %zu bytes", resp->status_code, resp->body_len);
+            gtk_label_set_text(GTK_LABEL(bw->status_bar), status_msg);
+        } else {
+            char err[4096];
+            snprintf(err, sizeof(err), ERROR_PAGE_FMT, url, "Empty response.");
+            tab_push_history(tab, url);
+            render_page(bw, err, strlen(err), "Error");
+            gtk_label_set_text(GTK_LABEL(bw->status_bar), "Empty response");
+        }
+
+        http_response_free(resp);
+        gtk_entry_set_text(GTK_ENTRY(bw->url_entry), url);
+        update_nav_buttons(bw);
+        return;
+    }
+
+    /* Bare domain name — try as https:// */
+    if (strchr(url, '.') && url[0] != '<' && url[0] != '/') {
+        char full_url[2048];
+        snprintf(full_url, sizeof(full_url), "https://%s", url);
+        browser_navigate(bw, full_url);
+        return;
+    }
+
     /* Unknown URL scheme — show error. */
     char err[4096];
-    snprintf(err, sizeof(err), ERROR_PAGE_FMT, url);
+    snprintf(err, sizeof(err), ERROR_PAGE_FMT, url,
+             "Unsupported URL scheme.");
     tab_push_history(tab, url);
     render_page(bw, err, strlen(err), "Error");
     gtk_entry_set_text(GTK_ENTRY(bw->url_entry), url);

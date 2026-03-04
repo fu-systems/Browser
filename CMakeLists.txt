@@ -120,6 +120,14 @@ if(WIN32)
 else()
     # ── Linux: GTK3 + Cairo + FreeType browser ───────────────────
 
+    # OpenSSL for HTTPS
+    find_package(OpenSSL REQUIRED)
+
+    # HTTP client library
+    add_library(pane_net src/net/http.c)
+    target_include_directories(pane_net PUBLIC ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(pane_net PUBLIC OpenSSL::SSL OpenSSL::Crypto)
+
     # Font library
     add_library(pane_font src/font/font.c)
     target_include_directories(pane_font PUBLIC
@@ -157,6 +165,7 @@ else()
         pane_engine
         pane_cairo
         pane_font
+        pane_net
         ${GTK3_LIBRARIES}
         m
     )
