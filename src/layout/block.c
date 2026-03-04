@@ -1,0 +1,228 @@
+/*
+ * Pane — Block Layout Implementation
+ *
+ * Block formatting context: children are laid out vertically.
+ * Each block-level child occupies the full width of the containing block.
+ */
+
+#include "block.h"
+#include "inline.h"
+#include <math.h>
+
+/* ── Resolve length to pixels ──────────────────────────────────────── */
+
+static float resolve_len(CssValue val, float font_size, float containing)
+{
+    switch (val.type) {
+    case VAL_LENGTH:
+        return css_length_to_px(val, font_size, 16.0f, 0, 0, containing);
+    case VAL_PERCENTAGE:
+        return val.percentage * containing / 100.0f;
+    case VAL_NUMBER:
+        return val.number;
+    default:
+        return 0.0f;
+    }
+}
+
+static float resolve_or_zero(CssValue val, float fs, float cb)
+{
+    if (val.type == VAL_AUTO || val.type == VAL_NONE) return 0;
+    return resolve_len(val, fs, cb);
+}
+
+/* ── Resolve box model edges ───────────────────────────────────────── */
+
+static void resolve_edges(LayoutBox *box, float containing_width)
+{
+    ComputedStyle *s = box->style;
+    float fs = s->font_size;
+
+    box->margin = s->margin;
+    box->padding = s->padding;
+    box->border = s->border_width;
+
+    /* Margin: auto handling for block horizontal centering. */
+    if (box->type == BOX_BLOCK) {
+        float content_w = 0;
+        if (s->width.type != VAL_AUTO) {
+            content_w = resolve_len(s->width, fs, containing_width);
+        } else {
+            content_w = containing_width - box->padding.left - box->padding.right
+                        - box->border.left - box->border.right
+                        - box->margin.left - box->margin.right;
+        }
+        /* If width is set and margin-left/right are auto, center. */
+        if (s->width.type != VAL_AUTO) {
+            float total_margin = containing_width - content_w
+                - box->padding.left - box->padding.right
+                - box->border.left - box->border.right;
+            if (total_margin > 0) {
+                /* Simple auto margin centering check. */
+                /* For now, margins stay as computed. */
+            }
+        }
+    }
+}
+
+/* ── Width Resolution ──────────────────────────────────────────────── */
+
+static float resolve_width(LayoutBox *box, float containing_width)
+{
+    ComputedStyle *s = box->style;
+    float fs = s->font_size;
+
+    if (s->width.type != VAL_AUTO) {
+        float w = resolve_len(s->width, fs, containing_width);
+        if (s->box_sizing == BOX_BORDER_BOX) {
+            w -= box->padding.left + box->padding.right +
+                 box->border.left + box->border.right;
+            if (w < 0) w = 0;
+        }
+        return w;
+    }
+
+    /* Auto width: fill containing block. */
+    float w = containing_width
+        - box->margin.left - box->margin.right
+        - box->border.left - box->border.right
+        - box->padding.left - box->padding.right;
+    return w > 0 ? w : 0;
+}
+
+/* ── Height Resolution ─────────────────────────────────────────────── */
+
+static float resolve_height(LayoutBox *box, float containing_height)
+{
+    ComputedStyle *s = box->style;
+    float fs = s->font_size;
+
+    if (s->height.type != VAL_AUTO) {
+        float h = resolve_len(s->height, fs, containing_height);
+        if (s->box_sizing == BOX_BORDER_BOX) {
+            h -= box->padding.top + box->padding.bottom +
+                 box->border.top + box->border.bottom;
+            if (h < 0) h = 0;
+        }
+        return h;
+    }
+
+    return -1; /* auto: determined by content */
+}
+
+/* Forward declaration. */
+static void layout_children(LayoutBox *box, Arena *arena);
+
+/* ── Block Layout ──────────────────────────────────────────────────── */
+
+void layout_block(LayoutBox *box, float containing_width, float containing_height,
+                  Arena *arena)
+{
+    resolve_edges(box, containing_width);
+
+    /* Resolve width. */
+    box->rect.width = resolve_width(box, containing_width);
+
+    /* Lay out children. */
+    layout_children(box, arena);
+
+    /* Resolve height. */
+    float specified_h = resolve_height(box, containing_height);
+    if (specified_h >= 0) {
+        box->rect.height = specified_h;
+    }
+    /* Otherwise height was set by layout_children. */
+
+    /* Apply min/max constraints. */
+    ComputedStyle *s = box->style;
+    float fs = s->font_size;
+    if (s->min_width.type != VAL_AUTO && s->min_width.type != VAL_NONE) {
+        float min_w = resolve_len(s->min_width, fs, containing_width);
+        if (box->rect.width < min_w) box->rect.width = min_w;
+    }
+    if (s->max_width.type != VAL_NONE && s->max_width.type != VAL_AUTO) {
+        float max_w = resolve_len(s->max_width, fs, containing_width);
+        if (box->rect.width > max_w) box->rect.width = max_w;
+    }
+    if (s->min_height.type != VAL_AUTO && s->min_height.type != VAL_NONE) {
+        float min_h = resolve_len(s->min_height, fs, containing_height);
+        if (box->rect.height < min_h) box->rect.height = min_h;
+    }
+    if (s->max_height.type != VAL_NONE && s->max_height.type != VAL_AUTO) {
+        float max_h = resolve_len(s->max_height, fs, containing_height);
+        if (box->rect.height > max_h) box->rect.height = max_h;
+    }
+}
+
+/* ── Margin Collapsing ─────────────────────────────────────────────── */
+
+static float collapse_margins(float margin_a, float margin_b)
+{
+    /* Both positive: larger wins. Both negative: more negative wins.
+     * One each: sum them. */
+    if (margin_a >= 0 && margin_b >= 0)
+        return fmaxf(margin_a, margin_b);
+    if (margin_a < 0 && margin_b < 0)
+        return fminf(margin_a, margin_b);
+    return margin_a + margin_b;
+}
+
+/* ── Child Layout ──────────────────────────────────────────────────── */
+
+static void layout_children(LayoutBox *box, Arena *arena)
+{
+    float cursor_y = 0;
+    float prev_margin_bottom = 0;
+    float content_width = box->rect.width;
+
+    for (LayoutBox *child = box->first_child; child; child = child->next_sibling) {
+        if (child->style && child->style->display == DISPLAY_NONE)
+            continue;
+
+        switch (child->type) {
+        case BOX_BLOCK:
+        case BOX_ANONYMOUS_BLOCK:
+        case BOX_TABLE:
+        case BOX_FLEX:
+        case BOX_GRID:
+            layout_block(child, content_width, box->rect.height, arena);
+
+            /* Margin collapsing: collapse top margin with previous bottom. */
+            float collapsed = collapse_margins(prev_margin_bottom, child->margin.top);
+            cursor_y += collapsed - prev_margin_bottom;
+
+            child->rect.x = child->margin.left + child->border.left + child->padding.left;
+            child->rect.y = cursor_y + child->margin.top + child->border.top + child->padding.top;
+
+            cursor_y = child->rect.y + child->rect.height +
+                       child->padding.bottom + child->border.bottom;
+            prev_margin_bottom = child->margin.bottom;
+            break;
+
+        case BOX_INLINE:
+        case BOX_TEXT:
+        case BOX_INLINE_BLOCK:
+            /* Inline content within a block: use inline layout. */
+            layout_inline(child, content_width, arena);
+            child->rect.x = 0;
+            child->rect.y = cursor_y;
+            cursor_y += child->rect.height;
+            prev_margin_bottom = 0;
+            break;
+
+        default:
+            /* Table rows, cells, etc. — simplified recursive layout. */
+            layout_block(child, content_width, box->rect.height, arena);
+            child->rect.x = 0;
+            child->rect.y = cursor_y;
+            cursor_y += layout_box_outer_height(child);
+            prev_margin_bottom = 0;
+            break;
+        }
+    }
+
+    /* Auto height: set to content height. */
+    if (box->style && box->style->height.type == VAL_AUTO) {
+        box->rect.height = cursor_y + prev_margin_bottom;
+    }
+}
