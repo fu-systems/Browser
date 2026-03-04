@@ -176,6 +176,12 @@ struct ComputedStyle {
     CssValue     top, right, bottom, left;
     BoxSizing    box_sizing;
 
+    /* Margin auto flags (for centering) */
+    bool         margin_top_auto;
+    bool         margin_right_auto;
+    bool         margin_bottom_auto;
+    bool         margin_left_auto;
+
     /* Border style & color */
     BorderStyle  border_top_style, border_right_style;
     BorderStyle  border_bottom_style, border_left_style;

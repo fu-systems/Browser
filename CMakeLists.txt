@@ -46,6 +46,7 @@ set(PANE_SOURCES
     src/layout/box.c
     src/layout/block.c
     src/layout/inline.c
+    src/layout/flex.c
     src/layout/layout.c
     # Paint
     src/paint/paint.c

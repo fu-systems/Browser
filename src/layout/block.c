@@ -7,6 +7,7 @@
 
 #include "block.h"
 #include "inline.h"
+#include "flex.h"
 #include <math.h>
 
 /* ── Resolve length to pixels ──────────────────────────────────────── */
@@ -43,23 +44,24 @@ static void resolve_edges(LayoutBox *box, float containing_width)
     box->border = s->border_width;
 
     /* Margin: auto handling for block horizontal centering. */
-    if (box->type == BOX_BLOCK) {
-        float content_w = 0;
-        if (s->width.type != VAL_AUTO) {
-            content_w = resolve_len(s->width, fs, containing_width);
-        } else {
-            content_w = containing_width - box->padding.left - box->padding.right
-                        - box->border.left - box->border.right
-                        - box->margin.left - box->margin.right;
+    if (box->type == BOX_BLOCK && s->width.type != VAL_AUTO) {
+        float content_w = resolve_len(s->width, fs, containing_width);
+        if (s->box_sizing == BOX_BORDER_BOX) {
+            content_w -= box->padding.left + box->padding.right
+                       + box->border.left + box->border.right;
+            if (content_w < 0) content_w = 0;
         }
-        /* If width is set and margin-left/right are auto, center. */
-        if (s->width.type != VAL_AUTO) {
-            float total_margin = containing_width - content_w
-                - box->padding.left - box->padding.right
-                - box->border.left - box->border.right;
-            if (total_margin > 0) {
-                /* Simple auto margin centering check. */
-                /* For now, margins stay as computed. */
+        float remaining = containing_width - content_w
+            - box->padding.left - box->padding.right
+            - box->border.left - box->border.right;
+        if (remaining > 0) {
+            if (s->margin_left_auto && s->margin_right_auto) {
+                box->margin.left = remaining / 2.0f;
+                box->margin.right = remaining / 2.0f;
+            } else if (s->margin_left_auto) {
+                box->margin.left = remaining - box->margin.right;
+            } else if (s->margin_right_auto) {
+                box->margin.right = remaining - box->margin.left;
             }
         }
     }
@@ -191,6 +193,11 @@ static void layout_children(LayoutBox *box, Arena *arena)
             float line_h = 0;
             float font_size = box->style ? box->style->font_size : 16.0f;
             float default_line_h = font_size * (box->style ? box->style->line_height : 1.2f);
+            TextAlign align = box->style ? box->style->text_align : TEXT_ALIGN_START;
+
+            /* Track line starts for text-align adjustment. */
+            LayoutBox *line_start = NULL;
+            float line_start_y = cursor_y;
 
             for (; child; child = child->next_sibling) {
                 if (child->style && child->style->display == DISPLAY_NONE)
@@ -209,15 +216,48 @@ static void layout_children(LayoutBox *box, Arena *arena)
 
                 /* Wrap to next line if needed. */
                 if (x + child_outer_w > content_width && x > 0) {
+                    /* Apply text-align to completed line. */
+                    if (align == TEXT_ALIGN_CENTER || align == TEXT_ALIGN_RIGHT ||
+                        align == TEXT_ALIGN_END) {
+                        float offset = content_width - x;
+                        if (align == TEXT_ALIGN_CENTER) offset /= 2.0f;
+                        if (offset > 0) {
+                            for (LayoutBox *lc = line_start; lc && lc != child;
+                                 lc = lc->next_sibling) {
+                                if (lc->style && lc->style->display == DISPLAY_NONE)
+                                    continue;
+                                lc->rect.x += offset;
+                            }
+                        }
+                    }
                     cursor_y += line_h > 0 ? line_h : default_line_h;
                     x = 0;
                     line_h = 0;
+                    line_start = child;
+                    line_start_y = cursor_y;
                 }
+
+                if (!line_start) line_start = child;
 
                 child->rect.x = x;
                 child->rect.y = cursor_y;
                 x += child_outer_w;
                 if (child_outer_h > line_h) line_h = child_outer_h;
+            }
+
+            /* Apply text-align to the last line. */
+            if (align == TEXT_ALIGN_CENTER || align == TEXT_ALIGN_RIGHT ||
+                align == TEXT_ALIGN_END) {
+                float offset = content_width - x;
+                if (align == TEXT_ALIGN_CENTER) offset /= 2.0f;
+                if (offset > 0 && line_start) {
+                    for (LayoutBox *lc = line_start; lc; lc = lc->next_sibling) {
+                        if (lc->style && lc->style->display == DISPLAY_NONE)
+                            continue;
+                        if (!is_inline_type(lc->type)) break;
+                        lc->rect.x += offset;
+                    }
+                }
             }
 
             /* Close the last line. */
@@ -231,10 +271,25 @@ static void layout_children(LayoutBox *box, Arena *arena)
         }
 
         switch (child->type) {
+        case BOX_FLEX: {
+            layout_flex(child, content_width, box->rect.height, arena);
+
+            /* Margin collapsing: collapse top margin with previous bottom. */
+            float collapsed = collapse_margins(prev_margin_bottom, child->margin.top);
+            cursor_y += collapsed - prev_margin_bottom;
+
+            child->rect.x = child->margin.left + child->border.left + child->padding.left;
+            child->rect.y = cursor_y + child->margin.top + child->border.top + child->padding.top;
+
+            cursor_y = child->rect.y + child->rect.height +
+                       child->padding.bottom + child->border.bottom;
+            prev_margin_bottom = child->margin.bottom;
+            break;
+        }
+
         case BOX_BLOCK:
         case BOX_ANONYMOUS_BLOCK:
         case BOX_TABLE:
-        case BOX_FLEX:
         case BOX_GRID: {
             layout_block(child, content_width, box->rect.height, arena);
 

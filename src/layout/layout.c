@@ -14,6 +14,7 @@
 #include "layout.h"
 #include "block.h"
 #include "inline.h"
+#include "flex.h"
 #include "../style/computed.h"
 #include "../style/context.h"
 #include "../css/cascade.h"
@@ -321,14 +322,41 @@ static LayoutBox *build_layout_box(Document *doc,
 
     PairwiseContext child_ctx = context_transition(parent_ctx, node, style);
 
+    /* Attach computed style to DOM node for later access. */
+    ((DomNode *)node)->computed_style = style;
+
+    /* ── 3b. display:contents — skip this box, return children
+     *    wrapped in an anonymous block so the parent can adopt them. */
+    if (style->display == DISPLAY_CONTENTS) {
+        LayoutBox *wrapper = layout_box_create(arena, BOX_ANONYMOUS_BLOCK, NULL,
+                                                computed_style_create(arena));
+        /* Inherit key properties for the wrapper. */
+        *wrapper->style = *style;
+        wrapper->style->display = DISPLAY_BLOCK;
+        wrapper->style->margin = (EdgeSizes){0};
+        wrapper->style->padding = (EdgeSizes){0};
+        wrapper->style->border_width = (EdgeSizes){0};
+        wrapper->style->background_color = (CssColor){0,0,0,0};
+        wrapper->style->width = (CssValue){ .type = VAL_AUTO };
+        wrapper->style->height = (CssValue){ .type = VAL_AUTO };
+        wrapper->ctx = child_ctx;
+
+        for (DomNode *child = node->first_child; child; child = child->next_sibling) {
+            LayoutBox *child_box = build_layout_box(
+                doc, child, stylesheets, ss_count,
+                style, &child_ctx, root_font_size, arena);
+            if (child_box) {
+                layout_box_append(wrapper, child_box);
+            }
+        }
+        return wrapper;
+    }
+
     /* ── 4. Create layout box ──────────────────────────────────── */
 
     LayoutBoxType box_type = box_type_for_display(style->display);
     LayoutBox *box = layout_box_create(arena, box_type, node, style);
     box->ctx = child_ctx;
-
-    /* Attach computed style to DOM node for later access. */
-    ((DomNode *)node)->computed_style = style;
 
     /* ── 4b. Replaced element defaults ────────────────────────── */
 
@@ -388,7 +416,11 @@ LayoutTree *layout_build(Document *doc,
     /* Run layout from root. */
     tree->root->rect.x = 0;
     tree->root->rect.y = 0;
-    layout_block(tree->root, viewport_width, viewport_height, &tree->arena);
+    if (tree->root->type == BOX_FLEX) {
+        layout_flex(tree->root, viewport_width, viewport_height, &tree->arena);
+    } else {
+        layout_block(tree->root, viewport_width, viewport_height, &tree->arena);
+    }
 
     return tree;
 }

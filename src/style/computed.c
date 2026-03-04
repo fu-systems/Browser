@@ -431,15 +431,19 @@ void computed_style_resolve(ComputedStyle *style,
             style->max_height = *val;
             break;
         case CSS_PROP_MARGIN_TOP:
+            style->margin_top_auto = (val->type == VAL_AUTO);
             style->margin.top = resolve_length(*val, fs, root_font_size, 0);
             break;
         case CSS_PROP_MARGIN_RIGHT:
+            style->margin_right_auto = (val->type == VAL_AUTO);
             style->margin.right = resolve_length(*val, fs, root_font_size, 0);
             break;
         case CSS_PROP_MARGIN_BOTTOM:
+            style->margin_bottom_auto = (val->type == VAL_AUTO);
             style->margin.bottom = resolve_length(*val, fs, root_font_size, 0);
             break;
         case CSS_PROP_MARGIN_LEFT:
+            style->margin_left_auto = (val->type == VAL_AUTO);
             style->margin.left = resolve_length(*val, fs, root_font_size, 0);
             break;
         case CSS_PROP_PADDING_TOP:
