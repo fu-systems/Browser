@@ -15,6 +15,12 @@
 
 #include "../pane.h"
 #include "../paint/cairo_backend.h"
+#include "../plugin/plugin.h"
+#include "../plugin/plugin_registry.h"
+#include "../plugin/plugin_pipeline.h"
+#include "../plugin/builtin/privacy_shield.h"
+#include "../plugin/builtin/dark_mode.h"
+#include "../plugin/builtin/cookie_manager.h"
 #include <gtk/gtk.h>
 
 /* ── Tab ───────────────────────────────────────────────────────────── */
@@ -39,6 +45,9 @@ typedef struct {
     char        *history[MAX_HISTORY];
     int          history_count;
     int          history_pos;   /* -1 = no history */
+
+    /* Per-tab plugin settings. */
+    bool         cookies_enabled;  /* per-tab cookie toggle */
 
     /* Tab widget (label in tab bar). */
     GtkWidget   *tab_label;
@@ -76,6 +85,16 @@ typedef struct {
     /* Viewport. */
     float        viewport_width;
     float        viewport_height;
+
+    /* Plugin system. */
+    PluginRegistry  *plugin_registry;
+    PluginContext   *plugin_context;
+    PluginPipeline  *plugin_pipeline;
+
+    /* Plugin toolbar widgets. */
+    GtkWidget       *privacy_btn;
+    GtkWidget       *darkmode_btn;
+    GtkWidget       *cookie_btn;
 } BrowserWindow;
 
 /* ── API ────────────────────────────────────────────────────────────── */

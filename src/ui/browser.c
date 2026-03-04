@@ -20,6 +20,7 @@ static void update_title(BrowserWindow *bw);
 static void update_nav_buttons(BrowserWindow *bw);
 static void update_scroll(BrowserWindow *bw);
 static BrowserTab *active(BrowserWindow *bw);
+static void update_plugin_button_style(GtkWidget *btn, bool enabled);
 
 /* ── Default pages ─────────────────────────────────────────────────── */
 
@@ -156,6 +157,10 @@ static void render_page(BrowserWindow *bw, const char *html, size_t len,
     tab->result = pane_render(html, len, NULL, 0,
                               bw->viewport_width, bw->viewport_height);
     tab->has_content = true;
+
+    /* Run plugin DOM-ready hook (lets plugins mutate the DOM). */
+    if (bw->plugin_pipeline && tab->result.document)
+        pipeline_run_dom_ready(bw->plugin_pipeline, tab->result.document);
     tab->scroll_x = 0;
     tab->scroll_y = 0;
 
@@ -211,6 +216,31 @@ void browser_navigate(BrowserWindow *bw, const char *url)
 {
     BrowserTab *tab = active(bw);
     if (!tab) return;
+
+    /* Run plugin navigation hook (may modify or cancel URL). */
+    char nav_url[4096];
+    strncpy(nav_url, url, sizeof(nav_url) - 1);
+    nav_url[sizeof(nav_url) - 1] = '\0';
+    if (bw->plugin_pipeline) {
+        if (!pipeline_run_navigate(bw->plugin_pipeline,
+                                   nav_url, sizeof(nav_url))) {
+            /* Plugin cancelled navigation. */
+            gtk_label_set_text(GTK_LABEL(bw->status_bar),
+                               "Navigation blocked by plugin");
+            return;
+        }
+        url = nav_url;
+    }
+
+    /* Sync cookie manager with per-tab cookie toggle. */
+    if (bw->plugin_registry) {
+        PanePlugin *cm = plugin_registry_find(bw->plugin_registry,
+                                              "cookie_manager");
+        if (cm) {
+            CookieManagerData *cmd = cookie_manager_get_data(cm);
+            if (cmd) cmd->cookies_enabled = tab->cookies_enabled;
+        }
+    }
 
     strncpy(tab->url, url, sizeof(tab->url) - 1);
 
@@ -271,7 +301,44 @@ void browser_navigate(BrowserWindow *bw, const char *url)
         /* Process pending GTK events to show "Loading..." immediately. */
         while (gtk_events_pending()) gtk_main_iteration();
 
+        /* Run plugin before-request hook. */
+        FetchRequest *freq = fetch_request_create(url);
+        if (bw->plugin_pipeline && freq) {
+            if (!pipeline_run_before_request(bw->plugin_pipeline, freq)) {
+                /* Plugin cancelled the request. */
+                fetch_request_free(freq);
+                gtk_label_set_text(GTK_LABEL(bw->status_bar),
+                                   "Request blocked by plugin");
+                update_nav_buttons(bw);
+                return;
+            }
+            /* Use possibly-modified URL from plugin. */
+            url = freq->url;
+        }
+
         HttpResponse *resp = http_get(url, 5);
+
+        /* Run plugin after-response hook. */
+        if (bw->plugin_pipeline && resp && !resp->error &&
+            resp->body && resp->body_len > 0) {
+            FetchResponse *fresp = fetch_response_create(
+                resp->status_code, resp->body, resp->body_len, url);
+            if (fresp) {
+                pipeline_run_after_response(bw->plugin_pipeline, fresp);
+                /* Copy back modified body if changed. */
+                if (fresp->body && fresp->body_len > 0 &&
+                    fresp->body_len != resp->body_len) {
+                    free(resp->body);
+                    resp->body = malloc(fresp->body_len + 1);
+                    memcpy(resp->body, fresp->body, fresp->body_len);
+                    resp->body[fresp->body_len] = '\0';
+                    resp->body_len = fresp->body_len;
+                }
+                fetch_response_free(fresp);
+            }
+        }
+
+        fetch_request_free(freq);
 
         if (resp->error) {
             char err[4096];
@@ -433,6 +500,10 @@ void browser_switch_tab(BrowserWindow *bw, int tab_idx)
     update_nav_buttons(bw);
     update_scroll(bw);
     redraw_content(bw);
+
+    /* Sync cookie button state with tab. */
+    if (bw->cookie_btn)
+        update_plugin_button_style(bw->cookie_btn, tab->cookies_enabled);
 }
 
 /* ── Tab callbacks ─────────────────────────────────────────────────── */
@@ -812,6 +883,75 @@ static void on_new_tab_btn(GtkWidget *widget, gpointer data)
     }
 }
 
+/* ── Plugin toggle callbacks ───────────────────────────────────────── */
+
+static void update_plugin_button_style(GtkWidget *btn, bool enabled)
+{
+    GtkStyleContext *ctx = gtk_widget_get_style_context(btn);
+    if (enabled)
+        gtk_style_context_add_class(ctx, "plugin-active");
+    else
+        gtk_style_context_remove_class(ctx, "plugin-active");
+}
+
+static void on_privacy_toggle(GtkWidget *widget, gpointer data)
+{
+    BrowserWindow *bw = data;
+    if (!bw->plugin_registry) return;
+
+    bool enabled = plugin_registry_is_enabled(bw->plugin_registry,
+                                              "privacy_shield");
+    if (enabled)
+        plugin_registry_disable(bw->plugin_registry, "privacy_shield");
+    else
+        plugin_registry_enable(bw->plugin_registry, "privacy_shield");
+
+    update_plugin_button_style(bw->privacy_btn, !enabled);
+
+    char msg[128];
+    snprintf(msg, sizeof(msg), "Privacy Shield: %s", !enabled ? "ON" : "OFF");
+    gtk_label_set_text(GTK_LABEL(bw->status_bar), msg);
+}
+
+static void on_darkmode_toggle(GtkWidget *widget, gpointer data)
+{
+    BrowserWindow *bw = data;
+    if (!bw->plugin_registry) return;
+
+    bool enabled = plugin_registry_is_enabled(bw->plugin_registry,
+                                              "dark_mode");
+    if (enabled)
+        plugin_registry_disable(bw->plugin_registry, "dark_mode");
+    else
+        plugin_registry_enable(bw->plugin_registry, "dark_mode");
+
+    update_plugin_button_style(bw->darkmode_btn, !enabled);
+
+    char msg[128];
+    snprintf(msg, sizeof(msg), "Dark Mode: %s", !enabled ? "ON" : "OFF");
+    gtk_label_set_text(GTK_LABEL(bw->status_bar), msg);
+
+    /* Reload current page to apply dark mode. */
+    BrowserTab *tab = active(bw);
+    if (tab && tab->has_content && tab->url[0])
+        browser_navigate(bw, tab->url);
+}
+
+static void on_cookie_toggle(GtkWidget *widget, gpointer data)
+{
+    BrowserWindow *bw = data;
+    BrowserTab *tab = active(bw);
+    if (!tab) return;
+
+    tab->cookies_enabled = !tab->cookies_enabled;
+    update_plugin_button_style(bw->cookie_btn, tab->cookies_enabled);
+
+    char msg[128];
+    snprintf(msg, sizeof(msg), "Cookies: %s (this tab)",
+             tab->cookies_enabled ? "ON" : "OFF");
+    gtk_label_set_text(GTK_LABEL(bw->status_bar), msg);
+}
+
 /* ── Resize callback ───────────────────────────────────────────────── */
 
 static void on_content_resize(GtkWidget *widget, GdkRectangle *alloc,
@@ -864,7 +1004,13 @@ static const char *BROWSER_CSS =
     "#url-entry:focus { border-color: #4a9eff; }\n"
     "#status-bar { background-color: #1e1e1e; color: #888;\n"
     "              padding: 2px 8px; font-size: 11px; }\n"
-    "#content-area { background-color: #ffffff; }\n";
+    "#content-area { background-color: #ffffff; }\n"
+    ".plugin-btn { background-color: #505050; border: 1px solid #666;\n"
+    "              color: #888; padding: 4px 8px; border-radius: 4px;\n"
+    "              min-width: 30px; font-size: 11px; }\n"
+    ".plugin-btn:hover { background-color: #606060; color: #ddd; }\n"
+    ".plugin-btn.plugin-active { background-color: #2e7d32;\n"
+    "                            border-color: #4caf50; color: #fff; }\n";
 
 /* ── Window creation ───────────────────────────────────────────────── */
 
@@ -945,6 +1091,28 @@ BrowserWindow *browser_window_new(void)
     g_signal_connect(bw->url_entry, "activate", G_CALLBACK(on_url_activate), bw);
     gtk_box_pack_start(GTK_BOX(bw->toolbar), bw->url_entry, TRUE, TRUE, 4);
 
+    /* Plugin toggle buttons. */
+    bw->privacy_btn = gtk_button_new_with_label("Privacy");
+    gtk_style_context_add_class(
+        gtk_widget_get_style_context(bw->privacy_btn), "plugin-btn");
+    g_signal_connect(bw->privacy_btn, "clicked",
+                     G_CALLBACK(on_privacy_toggle), bw);
+    gtk_box_pack_start(GTK_BOX(bw->toolbar), bw->privacy_btn, FALSE, FALSE, 0);
+
+    bw->darkmode_btn = gtk_button_new_with_label("Dark");
+    gtk_style_context_add_class(
+        gtk_widget_get_style_context(bw->darkmode_btn), "plugin-btn");
+    g_signal_connect(bw->darkmode_btn, "clicked",
+                     G_CALLBACK(on_darkmode_toggle), bw);
+    gtk_box_pack_start(GTK_BOX(bw->toolbar), bw->darkmode_btn, FALSE, FALSE, 0);
+
+    bw->cookie_btn = gtk_button_new_with_label("Cookies");
+    gtk_style_context_add_class(
+        gtk_widget_get_style_context(bw->cookie_btn), "plugin-btn");
+    g_signal_connect(bw->cookie_btn, "clicked",
+                     G_CALLBACK(on_cookie_toggle), bw);
+    gtk_box_pack_start(GTK_BOX(bw->toolbar), bw->cookie_btn, FALSE, FALSE, 0);
+
     gtk_box_pack_start(GTK_BOX(bw->main_vbox), bw->toolbar, FALSE, FALSE, 0);
 
     /* ── Content area + scrollbar ──────────────────────────────── */
@@ -986,6 +1154,21 @@ BrowserWindow *browser_window_new(void)
     gtk_label_set_xalign(GTK_LABEL(bw->status_bar), 0.0f);
     gtk_box_pack_end(GTK_BOX(bw->main_vbox), bw->status_bar, FALSE, FALSE, 0);
 
+    /* ── Initialize plugin system ──────────────────────────────── */
+
+    bw->plugin_registry = plugin_registry_create();
+    bw->plugin_context = plugin_context_create();
+    bw->plugin_pipeline = plugin_pipeline_create(bw->plugin_registry,
+                                                  bw->plugin_context);
+
+    /* Register built-in plugins (all disabled by default). */
+    plugin_registry_register(bw->plugin_registry, privacy_shield_create());
+    plugin_registry_register(bw->plugin_registry, dark_mode_create());
+    plugin_registry_register(bw->plugin_registry, cookie_manager_create());
+
+    /* Enable cookie manager (always registered, gated by per-tab toggle). */
+    plugin_registry_enable(bw->plugin_registry, "cookie_manager");
+
     /* ── Create first tab ──────────────────────────────────────── */
 
     int first = browser_add_tab(bw);
@@ -1008,6 +1191,11 @@ void browser_window_free(BrowserWindow *bw)
         tab_free_content(&bw->tabs[i]);
         tab_free_history(&bw->tabs[i]);
     }
+
+    /* Clean up plugin system. */
+    if (bw->plugin_pipeline) plugin_pipeline_free(bw->plugin_pipeline);
+    if (bw->plugin_registry) plugin_registry_free(bw->plugin_registry);
+    if (bw->plugin_context)  plugin_context_free(bw->plugin_context);
 
     font_system_shutdown();
     free(bw);

@@ -49,6 +49,13 @@ set(PANE_SOURCES
     src/layout/layout.c
     # Paint
     src/paint/paint.c
+    # Plugin system
+    src/plugin/plugin.c
+    src/plugin/plugin_registry.c
+    src/plugin/plugin_pipeline.c
+    src/plugin/builtin/privacy_shield.c
+    src/plugin/builtin/dark_mode.c
+    src/plugin/builtin/cookie_manager.c
     # Public API
     src/pane.c
 )
