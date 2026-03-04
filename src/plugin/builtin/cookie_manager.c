@@ -9,7 +9,7 @@
 #include "cookie_manager.h"
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
+#include "../../util/compat.h"
 #include <stdio.h>
 
 /* ── Helpers ───────────────────────────────────────────────────────── */

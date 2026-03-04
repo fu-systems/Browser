@@ -8,10 +8,20 @@
 
 #include "win32_browser.h"
 
+#ifdef _MSC_VER
+#include <windows.h>
+#include <stdlib.h>
+int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmdLine, int show)
+{
+    (void)hInst; (void)hPrev; (void)cmdLine; (void)show;
+    return win32_browser_run(__argc, __argv);
+}
+#else
 int main(int argc, char **argv)
 {
     return win32_browser_run(argc, argv);
 }
+#endif
 
 #else
 #include <stdio.h>

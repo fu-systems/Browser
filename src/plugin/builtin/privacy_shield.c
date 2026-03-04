@@ -11,7 +11,7 @@
 #include "privacy_shield.h"
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
+#include "../../util/compat.h"
 #include <ctype.h>
 
 /* ── Known tracking query-parameter names ──────────────────────────── */
