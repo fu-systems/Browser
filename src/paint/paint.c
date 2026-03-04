@@ -71,11 +71,23 @@ static void paint_box(DisplayList *dl, const LayoutBox *box,
         dl_push(dl, cmd);
     }
 
-    /* Text. */
-    if (box->type == BOX_TEXT && box->text && box->text_len > 0) {
+    /* Text — from BOX_TEXT nodes or replaced elements with text (input value, img alt). */
+    if (box->text && box->text_len > 0) {
+        float text_x = x + box->padding.left + box->border.left;
+        float text_y = y + box->padding.top + box->border.top;
+        float text_w = box->rect.width;
+        float text_h = box->rect.height;
+        if (box->type != BOX_TEXT) {
+            /* For replaced elements, constrain text to content area. */
+            text_w -= box->padding.left + box->padding.right;
+            text_h -= box->padding.top + box->padding.bottom;
+        } else {
+            text_x = x;
+            text_y = y;
+        }
         PaintCmd cmd = {
             .type = PAINT_TEXT,
-            .rect = { x, y, box->rect.width, box->rect.height },
+            .rect = { text_x, text_y, text_w, text_h },
             .text = {
                 .text = box->text,
                 .len = box->text_len,

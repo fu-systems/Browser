@@ -18,6 +18,200 @@
 #include "../style/context.h"
 #include "../css/cascade.h"
 #include <string.h>
+#include <stdlib.h>
+
+/* ── Replaced element intrinsic sizes ────────────────────────────── */
+
+static bool is_replaced_element(HtmlTag tag)
+{
+    switch (tag) {
+    case TAG_IMG: case TAG_INPUT: case TAG_BUTTON:
+    case TAG_SELECT: case TAG_TEXTAREA:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static void apply_replaced_defaults(LayoutBox *box, const DomNode *node,
+                                    Arena *arena)
+{
+    HtmlTag tag = node->elem.tag;
+    float fs = box->style ? box->style->font_size : 16.0f;
+
+    switch (tag) {
+    case TAG_INPUT: {
+        const char *type = elem_get_attr(node, "type");
+        if (!type) type = "text";
+
+        if (strcmp(type, "hidden") == 0) {
+            box->style->display = DISPLAY_NONE;
+            return;
+        }
+        if (strcmp(type, "submit") == 0 || strcmp(type, "button") == 0 ||
+            strcmp(type, "reset") == 0) {
+            const char *val = elem_get_attr(node, "value");
+            if (!val) {
+                if (strcmp(type, "submit") == 0) val = "Submit";
+                else if (strcmp(type, "reset") == 0) val = "Reset";
+                else val = "";
+            }
+            if (val[0]) {
+                box->text = val;
+                box->text_len = strlen(val);
+            }
+            box->type = BOX_INLINE_BLOCK;
+            if (box->style) {
+                if (box->padding.top < 4) box->padding.top = 4;
+                if (box->padding.bottom < 4) box->padding.bottom = 4;
+                if (box->padding.left < 8) box->padding.left = 8;
+                if (box->padding.right < 8) box->padding.right = 8;
+                if (box->border.top < 1) box->border.top = 1;
+                if (box->border.bottom < 1) box->border.bottom = 1;
+                if (box->border.left < 1) box->border.left = 1;
+                if (box->border.right < 1) box->border.right = 1;
+                box->style->border_top_color = (CssColor){0xAA,0xAA,0xAA,0xFF};
+                box->style->border_right_color = (CssColor){0xAA,0xAA,0xAA,0xFF};
+                box->style->border_bottom_color = (CssColor){0xAA,0xAA,0xAA,0xFF};
+                box->style->border_left_color = (CssColor){0xAA,0xAA,0xAA,0xFF};
+                box->style->background_color = (CssColor){0xEE,0xEE,0xEE,0xFF};
+            }
+            return;
+        }
+        if (strcmp(type, "checkbox") == 0 || strcmp(type, "radio") == 0) {
+            box->type = BOX_INLINE_BLOCK;
+            box->rect.width = fs;
+            box->rect.height = fs;
+            if (box->style) {
+                if (box->border.top < 1) box->border.top = 1;
+                if (box->border.bottom < 1) box->border.bottom = 1;
+                if (box->border.left < 1) box->border.left = 1;
+                if (box->border.right < 1) box->border.right = 1;
+                box->style->border_top_color = (CssColor){0x99,0x99,0x99,0xFF};
+                box->style->border_right_color = (CssColor){0x99,0x99,0x99,0xFF};
+                box->style->border_bottom_color = (CssColor){0x99,0x99,0x99,0xFF};
+                box->style->border_left_color = (CssColor){0x99,0x99,0x99,0xFF};
+                box->style->background_color = (CssColor){0xFF,0xFF,0xFF,0xFF};
+            }
+            return;
+        }
+        /* Text-like input (text, search, email, password, etc.) */
+        box->type = BOX_INLINE_BLOCK;
+        box->rect.width = fs * 12;
+        box->rect.height = fs * 1.4f;
+        if (box->style) {
+            if (box->padding.top < 2) box->padding.top = 2;
+            if (box->padding.bottom < 2) box->padding.bottom = 2;
+            if (box->padding.left < 4) box->padding.left = 4;
+            if (box->padding.right < 4) box->padding.right = 4;
+            if (box->border.top < 1) box->border.top = 1;
+            if (box->border.bottom < 1) box->border.bottom = 1;
+            if (box->border.left < 1) box->border.left = 1;
+            if (box->border.right < 1) box->border.right = 1;
+            box->style->border_top_color = (CssColor){0x99,0x99,0x99,0xFF};
+            box->style->border_right_color = (CssColor){0x99,0x99,0x99,0xFF};
+            box->style->border_bottom_color = (CssColor){0x99,0x99,0x99,0xFF};
+            box->style->border_left_color = (CssColor){0x99,0x99,0x99,0xFF};
+            box->style->background_color = (CssColor){0xFF,0xFF,0xFF,0xFF};
+        }
+        {
+            const char *val = elem_get_attr(node, "value");
+            if (!val || !val[0]) val = elem_get_attr(node, "placeholder");
+            if (val && val[0]) {
+                box->text = val;
+                box->text_len = strlen(val);
+            }
+        }
+        return;
+    }
+    case TAG_BUTTON:
+        box->type = BOX_INLINE_BLOCK;
+        if (box->style) {
+            if (box->padding.top < 4) box->padding.top = 4;
+            if (box->padding.bottom < 4) box->padding.bottom = 4;
+            if (box->padding.left < 12) box->padding.left = 12;
+            if (box->padding.right < 12) box->padding.right = 12;
+            if (box->border.top < 1) box->border.top = 1;
+            if (box->border.bottom < 1) box->border.bottom = 1;
+            if (box->border.left < 1) box->border.left = 1;
+            if (box->border.right < 1) box->border.right = 1;
+            box->style->border_top_color = (CssColor){0xAA,0xAA,0xAA,0xFF};
+            box->style->border_right_color = (CssColor){0xAA,0xAA,0xAA,0xFF};
+            box->style->border_bottom_color = (CssColor){0xAA,0xAA,0xAA,0xFF};
+            box->style->border_left_color = (CssColor){0xAA,0xAA,0xAA,0xFF};
+            box->style->background_color = (CssColor){0xEE,0xEE,0xEE,0xFF};
+        }
+        return;
+    case TAG_SELECT:
+        box->type = BOX_INLINE_BLOCK;
+        box->rect.width = fs * 10;
+        box->rect.height = fs * 1.4f;
+        if (box->style) {
+            if (box->padding.left < 4) box->padding.left = 4;
+            if (box->padding.right < 16) box->padding.right = 16;
+            if (box->border.top < 1) box->border.top = 1;
+            if (box->border.bottom < 1) box->border.bottom = 1;
+            if (box->border.left < 1) box->border.left = 1;
+            if (box->border.right < 1) box->border.right = 1;
+            box->style->border_top_color = (CssColor){0x99,0x99,0x99,0xFF};
+            box->style->border_right_color = (CssColor){0x99,0x99,0x99,0xFF};
+            box->style->border_bottom_color = (CssColor){0x99,0x99,0x99,0xFF};
+            box->style->border_left_color = (CssColor){0x99,0x99,0x99,0xFF};
+            box->style->background_color = (CssColor){0xFF,0xFF,0xFF,0xFF};
+        }
+        return;
+    case TAG_TEXTAREA:
+        box->type = BOX_INLINE_BLOCK;
+        box->rect.width = fs * 20;
+        box->rect.height = fs * 4;
+        if (box->style) {
+            if (box->padding.top < 2) box->padding.top = 2;
+            if (box->padding.bottom < 2) box->padding.bottom = 2;
+            if (box->padding.left < 4) box->padding.left = 4;
+            if (box->padding.right < 4) box->padding.right = 4;
+            if (box->border.top < 1) box->border.top = 1;
+            if (box->border.bottom < 1) box->border.bottom = 1;
+            if (box->border.left < 1) box->border.left = 1;
+            if (box->border.right < 1) box->border.right = 1;
+            box->style->border_top_color = (CssColor){0x99,0x99,0x99,0xFF};
+            box->style->border_right_color = (CssColor){0x99,0x99,0x99,0xFF};
+            box->style->border_bottom_color = (CssColor){0x99,0x99,0x99,0xFF};
+            box->style->border_left_color = (CssColor){0x99,0x99,0x99,0xFF};
+            box->style->background_color = (CssColor){0xFF,0xFF,0xFF,0xFF};
+        }
+        return;
+    case TAG_IMG: {
+        box->type = BOX_INLINE_BLOCK;
+        const char *alt = elem_get_attr(node, "alt");
+        const char *w_attr = elem_get_attr(node, "width");
+        const char *h_attr = elem_get_attr(node, "height");
+        float w = w_attr ? (float)atoi(w_attr) : 0;
+        float h = h_attr ? (float)atoi(h_attr) : 0;
+        if (w <= 0) w = alt && alt[0] ? (float)strlen(alt) * fs * 0.6f + 8 : 50;
+        if (h <= 0) h = alt && alt[0] ? fs * 1.4f + 4 : 50;
+        box->rect.width = w;
+        box->rect.height = h;
+        if (alt && alt[0]) {
+            box->text = alt;
+            box->text_len = strlen(alt);
+        }
+        if (box->style) {
+            if (box->border.top < 1) box->border.top = 1;
+            if (box->border.bottom < 1) box->border.bottom = 1;
+            if (box->border.left < 1) box->border.left = 1;
+            if (box->border.right < 1) box->border.right = 1;
+            box->style->border_top_color = (CssColor){0xCC,0xCC,0xCC,0xFF};
+            box->style->border_right_color = (CssColor){0xCC,0xCC,0xCC,0xFF};
+            box->style->border_bottom_color = (CssColor){0xCC,0xCC,0xCC,0xFF};
+            box->style->border_left_color = (CssColor){0xCC,0xCC,0xCC,0xFF};
+            box->style->background_color = (CssColor){0xF0,0xF0,0xF0,0xFF};
+        }
+        return;
+    }
+    default:
+        return;
+    }
+}
 
 /* ── Box type from display ─────────────────────────────────────────── */
 
@@ -135,6 +329,14 @@ static LayoutBox *build_layout_box(Document *doc,
 
     /* Attach computed style to DOM node for later access. */
     ((DomNode *)node)->computed_style = style;
+
+    /* ── 4b. Replaced element defaults ────────────────────────── */
+
+    if (is_replaced_element(node->elem.tag)) {
+        apply_replaced_defaults(box, node, arena);
+        /* display:none may have been set (e.g. hidden input). */
+        if (style->display == DISPLAY_NONE) return NULL;
+    }
 
     /* ── 5. Recursively build child boxes ──────────────────────── */
 

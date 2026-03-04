@@ -169,6 +169,11 @@ static float collapse_margins(float margin_a, float margin_b)
 
 /* ── Child Layout ──────────────────────────────────────────────────── */
 
+static bool is_inline_type(LayoutBoxType t)
+{
+    return t == BOX_INLINE || t == BOX_TEXT || t == BOX_INLINE_BLOCK;
+}
+
 static void layout_children(LayoutBox *box, Arena *arena)
 {
     float cursor_y = 0;
@@ -179,12 +184,58 @@ static void layout_children(LayoutBox *box, Arena *arena)
         if (child->style && child->style->display == DISPLAY_NONE)
             continue;
 
+        if (is_inline_type(child->type)) {
+            /* ── Inline formatting context: flow consecutive inline children
+             *    horizontally with word-wrapping. ─────────────────────── */
+            float x = 0;
+            float line_h = 0;
+            float font_size = box->style ? box->style->font_size : 16.0f;
+            float default_line_h = font_size * (box->style ? box->style->line_height : 1.2f);
+
+            for (; child; child = child->next_sibling) {
+                if (child->style && child->style->display == DISPLAY_NONE)
+                    continue;
+                if (!is_inline_type(child->type))
+                    break;
+
+                layout_inline(child, content_width, arena);
+
+                float child_outer_w = child->rect.width + child->padding.left
+                    + child->padding.right + child->border.left + child->border.right
+                    + child->margin.left + child->margin.right;
+                float child_outer_h = child->rect.height + child->padding.top
+                    + child->padding.bottom + child->border.top + child->border.bottom
+                    + child->margin.top + child->margin.bottom;
+
+                /* Wrap to next line if needed. */
+                if (x + child_outer_w > content_width && x > 0) {
+                    cursor_y += line_h > 0 ? line_h : default_line_h;
+                    x = 0;
+                    line_h = 0;
+                }
+
+                child->rect.x = x;
+                child->rect.y = cursor_y;
+                x += child_outer_w;
+                if (child_outer_h > line_h) line_h = child_outer_h;
+            }
+
+            /* Close the last line. */
+            cursor_y += line_h > 0 ? line_h : default_line_h;
+            prev_margin_bottom = 0;
+
+            /* The for loop advanced child past the last inline;
+             * check if we need to continue with the current (block) child. */
+            if (!child) break;
+            /* Fall through to handle the current non-inline child below. */
+        }
+
         switch (child->type) {
         case BOX_BLOCK:
         case BOX_ANONYMOUS_BLOCK:
         case BOX_TABLE:
         case BOX_FLEX:
-        case BOX_GRID:
+        case BOX_GRID: {
             layout_block(child, content_width, box->rect.height, arena);
 
             /* Margin collapsing: collapse top margin with previous bottom. */
@@ -198,17 +249,7 @@ static void layout_children(LayoutBox *box, Arena *arena)
                        child->padding.bottom + child->border.bottom;
             prev_margin_bottom = child->margin.bottom;
             break;
-
-        case BOX_INLINE:
-        case BOX_TEXT:
-        case BOX_INLINE_BLOCK:
-            /* Inline content within a block: use inline layout. */
-            layout_inline(child, content_width, arena);
-            child->rect.x = 0;
-            child->rect.y = cursor_y;
-            cursor_y += child->rect.height;
-            prev_margin_bottom = 0;
-            break;
+        }
 
         default:
             /* Table rows, cells, etc. — simplified recursive layout. */

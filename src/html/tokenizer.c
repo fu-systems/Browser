@@ -8,6 +8,95 @@
 #include "tokenizer.h"
 #include <ctype.h>
 #include <string.h>
+#include <stdlib.h>
+
+/* ── HTML Named Character References ──────────────────────────────── */
+
+typedef struct { const char *name; const char *value; } NamedEntity;
+
+static const NamedEntity entities[] = {
+    {"amp",      "&"},    {"lt",       "<"},    {"gt",       ">"},
+    {"quot",     "\""},   {"apos",     "'"},    {"nbsp",     "\xc2\xa0"},
+    {"copy",     "\xc2\xa9"}, {"reg",  "\xc2\xae"}, {"trade","\xe2\x84\xa2"},
+    {"laquo",    "\xc2\xab"}, {"raquo","\xc2\xbb"},
+    {"mdash",    "\xe2\x80\x94"}, {"ndash","\xe2\x80\x93"},
+    {"lsquo",    "\xe2\x80\x98"}, {"rsquo","\xe2\x80\x99"},
+    {"ldquo",    "\xe2\x80\x9c"}, {"rdquo","\xe2\x80\x9d"},
+    {"bull",     "\xe2\x80\xa2"}, {"hellip","\xe2\x80\xa6"},
+    {"prime",    "\xe2\x80\xb2"}, {"Prime","\xe2\x80\xb3"},
+    {"times",    "\xc3\x97"}, {"divide","\xc3\xb7"},
+    {"minus",    "\xe2\x88\x92"}, {"plusmn","\xc2\xb1"},
+    {"deg",      "\xc2\xb0"}, {"micro","\xc2\xb5"},
+    {"para",     "\xc2\xb6"}, {"middot","\xc2\xb7"},
+    {"cent",     "\xc2\xa2"}, {"pound","\xc2\xa3"},
+    {"euro",     "\xe2\x82\xac"}, {"yen","\xc2\xa5"},
+    {"sect",     "\xc2\xa7"}, {"iexcl","\xc2\xa1"},
+    {"iquest",   "\xc2\xbf"}, {"ordf","\xc2\xaa"},
+    {"ordm",     "\xc2\xba"}, {"not","\xc2\xac"},
+    {"shy",      "\xc2\xad"}, {"macr","\xc2\xaf"},
+    {"acute",    "\xc2\xb4"}, {"cedil","\xc2\xb8"},
+    {"sup1",     "\xc2\xb9"}, {"sup2","\xc2\xb2"},
+    {"sup3",     "\xc2\xb3"}, {"frac14","\xc2\xbc"},
+    {"frac12",   "\xc2\xbd"}, {"frac34","\xc2\xbe"},
+    {"larr",     "\xe2\x86\x90"}, {"uarr","\xe2\x86\x91"},
+    {"rarr",     "\xe2\x86\x92"}, {"darr","\xe2\x86\x93"},
+    {"hearts",   "\xe2\x99\xa5"}, {"diams","\xe2\x99\xa6"},
+    {"clubs",    "\xe2\x99\xa3"}, {"spades","\xe2\x99\xa0"},
+    {"loz",      "\xe2\x97\x8a"}, {"crarr","\xe2\x86\xb5"},
+    {"ensp",     "\xe2\x80\x82"}, {"emsp","\xe2\x80\x83"},
+    {"thinsp",   "\xe2\x80\x89"}, {"zwnj","\xe2\x80\x8c"},
+    {"zwj",      "\xe2\x80\x8d"}, {"lrm","\xe2\x80\x8e"},
+    {"rlm",      "\xe2\x80\x8f"},
+    /* Greek letters (subset) */
+    {"alpha",    "\xce\xb1"}, {"beta","\xce\xb2"},
+    {"gamma",    "\xce\xb3"}, {"delta","\xce\xb4"},
+    {"epsilon",  "\xce\xb5"}, {"pi","\xcf\x80"},
+    {"sigma",    "\xcf\x83"}, {"omega","\xcf\x89"},
+    {"Omega",    "\xce\xa9"}, {"Delta","\xce\x94"},
+    /* Common HTML entities */
+    {"uml",      "\xc2\xa8"}, {"circ","\xcb\x86"},
+    {"tilde",    "\xcb\x9c"},
+    {"fnof",     "\xc6\x92"}, {"infin","\xe2\x88\x9e"},
+    {"ne",       "\xe2\x89\xa0"}, {"le","\xe2\x89\xa4"},
+    {"ge",       "\xe2\x89\xa5"}, {"sum","\xe2\x88\x91"},
+    {"radic",    "\xe2\x88\x9a"}, {"empty","\xe2\x88\x85"},
+    {"exist",    "\xe2\x88\x83"}, {"forall","\xe2\x88\x80"},
+    {"part",     "\xe2\x88\x82"}, {"nabla","\xe2\x88\x87"},
+    {"isin",     "\xe2\x88\x88"}, {"notin","\xe2\x88\x89"},
+    {"and",      "\xe2\x88\xa7"}, {"or","\xe2\x88\xa8"},
+    {"oplus",    "\xe2\x8a\x95"}, {"otimes","\xe2\x8a\x97"},
+    {"perp",     "\xe2\x8a\xa5"},
+    {NULL, NULL}
+};
+
+/* Encode a Unicode codepoint as UTF-8 into buf. Returns bytes written. */
+static int encode_utf8(unsigned int cp, char *buf)
+{
+    if (cp < 0x80) {
+        buf[0] = (char)cp;
+        return 1;
+    } else if (cp < 0x800) {
+        buf[0] = (char)(0xC0 | (cp >> 6));
+        buf[1] = (char)(0x80 | (cp & 0x3F));
+        return 2;
+    } else if (cp < 0x10000) {
+        buf[0] = (char)(0xE0 | (cp >> 12));
+        buf[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        buf[2] = (char)(0x80 | (cp & 0x3F));
+        return 3;
+    } else if (cp < 0x110000) {
+        buf[0] = (char)(0xF0 | (cp >> 18));
+        buf[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+        buf[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        buf[3] = (char)(0x80 | (cp & 0x3F));
+        return 4;
+    }
+    buf[0] = '?';
+    return 1;
+}
+
+/* Forward declaration — defined after at_eof/peek/consume. */
+static int try_decode_charref(HtmlTokenizer *t, char *buf, size_t buf_cap);
 
 void tokenizer_init(HtmlTokenizer *t, const char *input, size_t len)
 {
@@ -40,6 +129,78 @@ static inline char consume(HtmlTokenizer *t)
 static inline void reconsume(HtmlTokenizer *t)
 {
     if (t->pos > 0) t->pos--;
+}
+
+/* ── Character reference decoder (uses at_eof/peek/consume) ───────── */
+
+static int try_decode_charref(HtmlTokenizer *t, char *buf, size_t buf_cap)
+{
+    size_t start_pos = t->pos;
+
+    if (at_eof(t)) return 0;
+
+    /* Numeric reference: &#... */
+    if (peek(t) == '#') {
+        consume(t);
+        unsigned int cp = 0;
+        int digits = 0;
+
+        if (!at_eof(t) && (peek(t) == 'x' || peek(t) == 'X')) {
+            consume(t);
+            while (!at_eof(t) && digits < 8) {
+                char c = peek(t);
+                if (c >= '0' && c <= '9')      { cp = cp * 16 + (c - '0'); }
+                else if (c >= 'a' && c <= 'f') { cp = cp * 16 + (c - 'a' + 10); }
+                else if (c >= 'A' && c <= 'F') { cp = cp * 16 + (c - 'A' + 10); }
+                else break;
+                consume(t);
+                digits++;
+            }
+        } else {
+            while (!at_eof(t) && digits < 10) {
+                char c = peek(t);
+                if (c >= '0' && c <= '9') { cp = cp * 10 + (c - '0'); }
+                else break;
+                consume(t);
+                digits++;
+            }
+        }
+
+        if (!at_eof(t) && peek(t) == ';') consume(t);
+
+        if (digits > 0 && cp > 0 && cp < 0x110000) {
+            return encode_utf8(cp, buf);
+        }
+        t->pos = start_pos;
+        return 0;
+    }
+
+    /* Named reference: &name; */
+    char name[32];
+    int name_len = 0;
+    while (!at_eof(t) && name_len < 30) {
+        char c = peek(t);
+        if (c == ';') { consume(t); break; }
+        if (!isalnum((unsigned char)c)) break;
+        name[name_len++] = c;
+        consume(t);
+    }
+    name[name_len] = '\0';
+
+    if (name_len > 0) {
+        for (const NamedEntity *e = entities; e->name; e++) {
+            if (strcmp(e->name, name) == 0) {
+                int vlen = (int)strlen(e->value);
+                if ((size_t)vlen <= buf_cap) {
+                    memcpy(buf, e->value, vlen);
+                    return vlen;
+                }
+            }
+        }
+    }
+
+    t->pos = start_pos;
+    return 0;
 }
 
 static void emit_char_token(HtmlToken *out, char c)
@@ -107,6 +268,16 @@ bool tokenizer_next(HtmlTokenizer *t, HtmlToken *out)
                 t->state = STATE_TAG_OPEN;
                 continue;
             }
+            if (c == '&') {
+                char decoded[8];
+                int n = try_decode_charref(t, decoded, sizeof(decoded));
+                if (n > 0) {
+                    out->type = TOK_CHARACTER;
+                    memcpy(out->ch_data, decoded, n);
+                    out->ch_len = n;
+                    return true;
+                }
+            }
             emit_char_token(out, c);
             return true;
         }
@@ -115,6 +286,16 @@ bool tokenizer_next(HtmlTokenizer *t, HtmlToken *out)
             if (at_eof(t)) { emit_eof(out); return false; }
             char c = consume(t);
             if (c == '<') { t->state = STATE_RCDATA_LESS_THAN; continue; }
+            if (c == '&') {
+                char decoded[8];
+                int n = try_decode_charref(t, decoded, sizeof(decoded));
+                if (n > 0) {
+                    out->type = TOK_CHARACTER;
+                    memcpy(out->ch_data, decoded, n);
+                    out->ch_len = n;
+                    return true;
+                }
+            }
             emit_char_token(out, c);
             return true;
         }
@@ -354,6 +535,15 @@ bool tokenizer_next(HtmlTokenizer *t, HtmlToken *out)
                 t->state = STATE_AFTER_ATTR_VALUE_QUOTED;
                 continue;
             }
+            if (c == '&') {
+                char decoded[8];
+                int n = try_decode_charref(t, decoded, sizeof(decoded));
+                if (n > 0) {
+                    for (int i = 0; i < n && t->attr_value_len < sizeof(t->attr_value_buf) - 1; i++)
+                        t->attr_value_buf[t->attr_value_len++] = decoded[i];
+                    continue;
+                }
+            }
             if (t->attr_value_len < sizeof(t->attr_value_buf) - 1)
                 t->attr_value_buf[t->attr_value_len++] = c;
             continue;
@@ -367,6 +557,15 @@ bool tokenizer_next(HtmlTokenizer *t, HtmlToken *out)
                                   t->attr_value_buf, t->attr_value_len);
                 t->state = STATE_AFTER_ATTR_VALUE_QUOTED;
                 continue;
+            }
+            if (c == '&') {
+                char decoded[8];
+                int n = try_decode_charref(t, decoded, sizeof(decoded));
+                if (n > 0) {
+                    for (int i = 0; i < n && t->attr_value_len < sizeof(t->attr_value_buf) - 1; i++)
+                        t->attr_value_buf[t->attr_value_len++] = decoded[i];
+                    continue;
+                }
             }
             if (t->attr_value_len < sizeof(t->attr_value_buf) - 1)
                 t->attr_value_buf[t->attr_value_len++] = c;
