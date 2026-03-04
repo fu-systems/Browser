@@ -5,15 +5,22 @@ set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# ── Find dependencies ───────────────────────────────────────────────
+# ── Platform detection ───────────────────────────────────────────────
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
-pkg_check_modules(CAIRO REQUIRED cairo)
-pkg_check_modules(FREETYPE REQUIRED freetype2)
-pkg_check_modules(FONTCONFIG REQUIRED fontconfig)
+if(WIN32)
+    set(PANE_PLATFORM "win32")
+else()
+    set(PANE_PLATFORM "linux")
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
+    pkg_check_modules(CAIRO REQUIRED cairo)
+    pkg_check_modules(FREETYPE REQUIRED freetype2)
+    pkg_check_modules(FONTCONFIG REQUIRED fontconfig)
+endif()
 
-# ── Core engine sources ─────────────────────────────────────────────
+message(STATUS "Pane Browser — platform: ${PANE_PLATFORM}")
+
+# ── Core engine sources (platform-independent) ──────────────────────
 
 set(PANE_SOURCES
     # Utilities
@@ -54,87 +61,118 @@ target_include_directories(pane_engine PUBLIC
     ${CMAKE_SOURCE_DIR}/src
 )
 
-target_link_libraries(pane_engine PRIVATE m)
+if(WIN32)
+    target_link_libraries(pane_engine PRIVATE)
+else()
+    target_link_libraries(pane_engine PRIVATE m)
+endif()
 
 # ── CLI demo executable ─────────────────────────────────────────────
 
 add_executable(pane_cli src/main.c)
 
-target_link_libraries(pane_cli PRIVATE pane_engine m)
+target_link_libraries(pane_cli PRIVATE pane_engine)
+if(NOT WIN32)
+    target_link_libraries(pane_cli PRIVATE m)
+endif()
 
 target_include_directories(pane_cli PRIVATE
     ${CMAKE_SOURCE_DIR}/src
 )
 
-# ── Font rendering library ──────────────────────────────────────────
+# ── Platform-specific builds ─────────────────────────────────────────
 
-add_library(pane_font
-    src/font/font.c
-)
+if(WIN32)
+    # ── Windows: Win32 GDI browser ───────────────────────────────
 
-target_include_directories(pane_font PUBLIC
-    ${CMAKE_SOURCE_DIR}/src
-    ${FREETYPE_INCLUDE_DIRS}
-    ${FONTCONFIG_INCLUDE_DIRS}
-)
+    # Find FreeType (via vcpkg, manual install, or system)
+    find_package(Freetype QUIET)
+    if(Freetype_FOUND)
+        message(STATUS "FreeType found: ${FREETYPE_LIBRARIES}")
+    else()
+        message(STATUS "FreeType not found — building without font rendering")
+    endif()
 
-target_link_libraries(pane_font PUBLIC
-    ${FREETYPE_LIBRARIES}
-    ${FONTCONFIG_LIBRARIES}
-)
+    # Font library (optional — uses FreeType if available)
+    if(Freetype_FOUND)
+        add_library(pane_font src/font/font.c)
+        target_include_directories(pane_font PUBLIC
+            ${CMAKE_SOURCE_DIR}/src
+            ${FREETYPE_INCLUDE_DIRS}
+        )
+        target_link_libraries(pane_font PUBLIC Freetype::Freetype)
+    endif()
 
-# ── Cairo paint backend ─────────────────────────────────────────────
+    # Win32 browser
+    add_executable(pane WIN32
+        src/ui/win32_browser.c
+        src/ui/main_win32.c
+    )
+    target_include_directories(pane PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(pane PRIVATE
+        pane_engine
+        gdi32 user32 comctl32
+    )
+    if(Freetype_FOUND)
+        target_link_libraries(pane PRIVATE pane_font)
+    endif()
 
-add_library(pane_cairo
-    src/paint/cairo_backend.c
-)
+else()
+    # ── Linux: GTK3 + Cairo + FreeType browser ───────────────────
 
-target_include_directories(pane_cairo PUBLIC
-    ${CMAKE_SOURCE_DIR}/src
-    ${CAIRO_INCLUDE_DIRS}
-)
+    # Font library
+    add_library(pane_font src/font/font.c)
+    target_include_directories(pane_font PUBLIC
+        ${CMAKE_SOURCE_DIR}/src
+        ${FREETYPE_INCLUDE_DIRS}
+        ${FONTCONFIG_INCLUDE_DIRS}
+    )
+    target_link_libraries(pane_font PUBLIC
+        ${FREETYPE_LIBRARIES}
+        ${FONTCONFIG_LIBRARIES}
+    )
 
-target_link_libraries(pane_cairo PUBLIC
-    pane_engine
-    pane_font
-    ${CAIRO_LIBRARIES}
-)
+    # Cairo paint backend
+    add_library(pane_cairo src/paint/cairo_backend.c)
+    target_include_directories(pane_cairo PUBLIC
+        ${CMAKE_SOURCE_DIR}/src
+        ${CAIRO_INCLUDE_DIRS}
+    )
+    target_link_libraries(pane_cairo PUBLIC
+        pane_engine
+        pane_font
+        ${CAIRO_LIBRARIES}
+    )
 
-# ── Browser GUI executable ──────────────────────────────────────────
+    # GTK3 browser
+    add_executable(pane
+        src/ui/browser.c
+        src/ui/main_gui.c
+    )
+    target_include_directories(pane PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${GTK3_INCLUDE_DIRS}
+    )
+    target_link_libraries(pane PRIVATE
+        pane_engine
+        pane_cairo
+        pane_font
+        ${GTK3_LIBRARIES}
+        m
+    )
+    target_compile_options(pane PRIVATE ${GTK3_CFLAGS_OTHER})
 
-add_executable(pane
-    src/ui/browser.c
-    src/ui/main_gui.c
-)
-
-target_include_directories(pane PRIVATE
-    ${CMAKE_SOURCE_DIR}/src
-    ${GTK3_INCLUDE_DIRS}
-)
-
-target_link_libraries(pane PRIVATE
-    pane_engine
-    pane_cairo
-    pane_font
-    ${GTK3_LIBRARIES}
-    m
-)
-
-target_compile_options(pane PRIVATE ${GTK3_CFLAGS_OTHER})
-
-# ── Offscreen render test ────────────────────────────────────────────
-
-add_executable(pane_render_test src/ui/render_test.c)
-
-target_include_directories(pane_render_test PRIVATE
-    ${CMAKE_SOURCE_DIR}/src
-    ${CAIRO_INCLUDE_DIRS}
-)
-
-target_link_libraries(pane_render_test PRIVATE
-    pane_engine
-    pane_cairo
-    pane_font
-    ${CAIRO_LIBRARIES}
-    m
-)
+    # Offscreen render test
+    add_executable(pane_render_test src/ui/render_test.c)
+    target_include_directories(pane_render_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CAIRO_INCLUDE_DIRS}
+    )
+    target_link_libraries(pane_render_test PRIVATE
+        pane_engine
+        pane_cairo
+        pane_font
+        ${CAIRO_LIBRARIES}
+        m
+    )
+endif()
