@@ -192,3 +192,27 @@ bool css_color_from_hex(const char *hex, size_t len, CssColor *out)
 
     return false;
 }
+
+CssColor css_parse_color_string(const char *str)
+{
+    CssColor c = {0, 0, 0, 0};
+    if (!str || !str[0]) return c;
+
+    size_t len = strlen(str);
+
+    /* Try hex first. */
+    if (str[0] == '#') {
+        if (css_color_from_hex(str, len, &c)) return c;
+        return (CssColor){0, 0, 0, 0};
+    }
+
+    /* Try named color. */
+    if (css_color_from_name(str, len, &c)) return c;
+
+    /* Try bare hex (HTML allows color="FF0000" without #). */
+    if (len == 6 || len == 3) {
+        if (css_color_from_hex(str, len, &c)) return c;
+    }
+
+    return (CssColor){0, 0, 0, 0};
+}

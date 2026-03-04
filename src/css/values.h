@@ -118,4 +118,7 @@ bool css_color_from_name(const char *name, size_t len, CssColor *out);
 /* Parse a hex color. Returns false if not valid. */
 bool css_color_from_hex(const char *hex, size_t len, CssColor *out);
 
+/* Parse an HTML color string (hex or named). Returns transparent on failure. */
+CssColor css_parse_color_string(const char *str);
+
 #endif /* PANE_CSS_VALUES_H */

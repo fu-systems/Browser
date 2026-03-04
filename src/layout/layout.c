@@ -15,9 +15,11 @@
 #include "block.h"
 #include "inline.h"
 #include "flex.h"
+#include "table.h"
 #include "../style/computed.h"
 #include "../style/context.h"
 #include "../css/cascade.h"
+#include "../util/compat.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -214,6 +216,127 @@ static void apply_replaced_defaults(LayoutBox *box, const DomNode *node,
     }
 }
 
+/* ── HTML Presentational Attributes ────────────────────────────────── */
+
+/* Map <font size="N"> to CSS font-size.
+ * HTML font sizes: 1=x-small, 2=small, 3=medium(16px), 4=large, 5=x-large,
+ *                  6=xx-large, 7=xxx-large.
+ * +N/-N are relative to base size 3. */
+static float font_size_for_html_size(const char *size_str, float parent_fs)
+{
+    static const float abs_sizes[] = {
+        10.0f, 13.0f, 16.0f, 18.0f, 24.0f, 32.0f, 48.0f
+    };
+
+    if (!size_str || !size_str[0]) return parent_fs;
+
+    int val;
+    if (size_str[0] == '+' || size_str[0] == '-') {
+        /* Relative: base is 3. */
+        int delta = atoi(size_str);
+        val = 3 + delta;
+    } else {
+        val = atoi(size_str);
+    }
+
+    if (val < 1) val = 1;
+    if (val > 7) val = 7;
+    return abs_sizes[val - 1];
+}
+
+/* Apply HTML presentational attributes to a computed style.
+ * These act like author-level CSS with specificity 0. */
+static void apply_presentational_attrs(ComputedStyle *style, const DomNode *node)
+{
+    if (!node || node->type != PANE_NODE_ELEMENT) return;
+
+    HtmlTag tag = node->elem.tag;
+
+    /* <font size="..." color="..." face="..."> */
+    if (tag == TAG_FONT) {
+        const char *size = elem_get_attr(node, "size");
+        if (size && size[0]) {
+            style->font_size = font_size_for_html_size(size, style->font_size);
+        }
+
+        const char *color = elem_get_attr(node, "color");
+        if (color && color[0]) {
+            CssColor c = css_parse_color_string(color);
+            if (c.a > 0) style->color = c;
+        }
+
+        const char *face = elem_get_attr(node, "face");
+        if (face && face[0]) {
+            style->font_family = face;
+        }
+    }
+
+    /* <body text="..." bgcolor="..."> */
+    if (tag == TAG_BODY) {
+        const char *text = elem_get_attr(node, "text");
+        if (text && text[0]) {
+            CssColor c = css_parse_color_string(text);
+            if (c.a > 0) style->color = c;
+        }
+
+        const char *bgcolor = elem_get_attr(node, "bgcolor");
+        if (bgcolor && bgcolor[0]) {
+            CssColor c = css_parse_color_string(bgcolor);
+            if (c.a > 0) style->background_color = c;
+        }
+    }
+
+    /* bgcolor on table elements. */
+    if (tag == TAG_TABLE || tag == TAG_TR || tag == TAG_TD || tag == TAG_TH) {
+        const char *bgcolor = elem_get_attr(node, "bgcolor");
+        if (bgcolor && bgcolor[0]) {
+            CssColor c = css_parse_color_string(bgcolor);
+            if (c.a > 0) style->background_color = c;
+        }
+    }
+
+    /* align attribute on block elements (maps to text-align). */
+    if (tag == TAG_P || tag == TAG_DIV || tag == TAG_TD || tag == TAG_TH ||
+        tag == TAG_CENTER || tag == TAG_H1 || tag == TAG_H2 || tag == TAG_H3 ||
+        tag == TAG_H4 || tag == TAG_H5 || tag == TAG_H6 || tag == TAG_TABLE ||
+        tag == TAG_TR) {
+        const char *align = elem_get_attr(node, "align");
+        if (align && align[0]) {
+            if (strcasecmp(align, "center") == 0)
+                style->text_align = TEXT_ALIGN_CENTER;
+            else if (strcasecmp(align, "right") == 0)
+                style->text_align = TEXT_ALIGN_RIGHT;
+            else if (strcasecmp(align, "left") == 0)
+                style->text_align = TEXT_ALIGN_LEFT;
+        }
+    }
+
+    /* <center> tag means text-align: center. */
+    if (tag == TAG_CENTER) {
+        style->text_align = TEXT_ALIGN_CENTER;
+    }
+
+    /* <b>, <strong> → bold. */
+    if (tag == TAG_B || tag == TAG_STRONG) {
+        style->font_weight = 700;
+    }
+
+    /* <tt>, <code>, <samp>, <kbd> → monospace. */
+    if (tag == TAG_TT || tag == TAG_CODE || tag == TAG_SAMP || tag == TAG_KBD) {
+        style->font_family = "monospace";
+    }
+
+    /* <i>, <em> → italic (we don't have italic rendering yet, but set it). */
+
+    /* <big> → larger, <small> → smaller. */
+    if (tag == TAG_BIG) {
+        style->font_size = style->font_size * 1.17f;
+    }
+    if (tag == TAG_SMALL) {
+        style->font_size = style->font_size / 1.17f;
+    }
+}
+
 /* ── Box type from display ─────────────────────────────────────────── */
 
 static LayoutBoxType box_type_for_display(Display display)
@@ -314,6 +437,9 @@ static LayoutBox *build_layout_box(Document *doc,
     if (!cascade_get(&cascade, CSS_PROP_DISPLAY)) {
         style->display = display_for_tag(node->elem.tag);
     }
+
+    /* Apply HTML presentational attributes (font size/color, bgcolor, align, etc.). */
+    apply_presentational_attrs(style, node);
 
     /* Skip display:none. */
     if (style->display == DISPLAY_NONE) return NULL;
@@ -418,6 +544,8 @@ LayoutTree *layout_build(Document *doc,
     tree->root->rect.y = 0;
     if (tree->root->type == BOX_FLEX) {
         layout_flex(tree->root, viewport_width, viewport_height, &tree->arena);
+    } else if (tree->root->type == BOX_TABLE) {
+        layout_table(tree->root, viewport_width, viewport_height, &tree->arena);
     } else {
         layout_block(tree->root, viewport_width, viewport_height, &tree->arena);
     }

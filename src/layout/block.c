@@ -8,6 +8,7 @@
 #include "block.h"
 #include "inline.h"
 #include "flex.h"
+#include "table.h"
 #include <math.h>
 
 /* ── Resolve length to pixels ──────────────────────────────────────── */
@@ -287,9 +288,24 @@ static void layout_children(LayoutBox *box, Arena *arena)
             break;
         }
 
+        case BOX_TABLE: {
+            layout_table(child, content_width, box->rect.height, arena);
+
+            /* Margin collapsing: collapse top margin with previous bottom. */
+            float collapsed = collapse_margins(prev_margin_bottom, child->margin.top);
+            cursor_y += collapsed - prev_margin_bottom;
+
+            child->rect.x = child->margin.left + child->border.left + child->padding.left;
+            child->rect.y = cursor_y + child->margin.top + child->border.top + child->padding.top;
+
+            cursor_y = child->rect.y + child->rect.height +
+                       child->padding.bottom + child->border.bottom;
+            prev_margin_bottom = child->margin.bottom;
+            break;
+        }
+
         case BOX_BLOCK:
         case BOX_ANONYMOUS_BLOCK:
-        case BOX_TABLE:
         case BOX_GRID: {
             layout_block(child, content_width, box->rect.height, arena);
 
