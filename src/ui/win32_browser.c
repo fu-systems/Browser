@@ -24,6 +24,7 @@
 #include "win32_browser.h"
 #include "../pane.h"
 #include "../font/font.h"
+#include "../net/http.h"
 #include "../style/computed.h"
 #include "../layout/box.h"
 #include "../html/tree_builder.h"
@@ -140,6 +141,22 @@ static void load_page(const char *html, size_t len)
     }
 }
 
+static void show_error(const char *url, const char *detail)
+{
+    char err[4096];
+    snprintf(err, sizeof(err),
+        "<html><head><title>Error</title>"
+        "<style>body{font-family:sans-serif;margin:60px;background:#fff5f5;color:#333}"
+        "h1{color:#c0392b;font-size:24px}"
+        "p{font-size:14px;color:#666}"
+        ".url{font-family:monospace;background:#f0f0f0;padding:4px 8px}</style></head>"
+        "<body><h1>Page Load Error</h1>"
+        "<p>Could not load: <span class=\"url\">%s</span></p>"
+        "<p>%s</p></body></html>",
+        url, detail);
+    load_page(err, strlen(err));
+}
+
 static void navigate(const char *url)
 {
     strncpy(g.current_url, url, MAX_URL - 1);
@@ -156,30 +173,57 @@ static void navigate(const char *url)
     }
 
     /* File path. */
-    const char *path = url;
-    if (strncmp(url, "file:///", 8) == 0) path = url + 8;
-    else if (strncmp(url, "file://", 7) == 0) path = url + 7;
+    if (strncmp(url, "file://", 7) == 0 || url[0] == '/' ||
+        (url[0] != '\0' && url[1] == ':')) {
+        const char *path = url;
+        if (strncmp(url, "file:///", 8) == 0) path = url + 8;
+        else if (strncmp(url, "file://", 7) == 0) path = url + 7;
 
-    FILE *f = fopen(path, "rb");
-    if (!f) {
-        char err[4096];
-        snprintf(err, sizeof(err),
-            "<html><body><h1>Error</h1><p>Cannot open: %s</p></body></html>", url);
-        load_page(err, strlen(err));
+        FILE *f = fopen(path, "rb");
+        if (!f) {
+            show_error(url, "File not found.");
+            return;
+        }
+
+        fseek(f, 0, SEEK_END);
+        long sz = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        char *buf = (char *)malloc(sz + 1);
+        if (buf) {
+            fread(buf, 1, sz, f);
+            buf[sz] = '\0';
+            load_page(buf, sz);
+            free(buf);
+        }
+        fclose(f);
         return;
     }
 
-    fseek(f, 0, SEEK_END);
-    long sz = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    char *buf = (char *)malloc(sz + 1);
-    if (buf) {
-        fread(buf, 1, sz, f);
-        buf[sz] = '\0';
-        load_page(buf, sz);
-        free(buf);
+    /* HTTP / HTTPS URLs. */
+    if (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0) {
+        HttpResponse *resp = http_get(url, 5);
+
+        if (resp->error) {
+            show_error(url, resp->error);
+        } else if (resp->body && resp->body_len > 0) {
+            load_page(resp->body, resp->body_len);
+        } else {
+            show_error(url, "Empty response.");
+        }
+
+        http_response_free(resp);
+        return;
     }
-    fclose(f);
+
+    /* Bare domain name — try as https:// */
+    if (strchr(url, '.') && url[0] != '<' && url[0] != '/') {
+        char full_url[2048];
+        snprintf(full_url, sizeof(full_url), "https://%s", url);
+        navigate(full_url);
+        return;
+    }
+
+    show_error(url, "Unsupported URL scheme.");
 }
 
 /* ── Render layout box via GDI ─────────────────────────────────────── */

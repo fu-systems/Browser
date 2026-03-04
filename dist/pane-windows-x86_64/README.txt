@@ -2,7 +2,8 @@ Pane Browser v0.1.0 — Windows x86_64
 ======================================
 
 A web browser built from scratch in C17 with a pairwise context
-transition rendering engine. Uses native Win32 GDI for rendering.
+transition rendering engine. Uses native Win32 GDI for rendering
+and WinHTTP for HTTP/HTTPS networking.
 
 BUILD FROM SOURCE
 -----------------
@@ -36,13 +37,21 @@ USAGE
   Double-click pane.exe to launch the browser.
 
   Features:
-  - Address bar: type file paths or HTML
+  - HTTP/HTTPS: type any URL (e.g. google.com) to fetch web pages
+  - Address bar: type URLs, file paths, or inline HTML
   - Navigation: Back (<), Forward (>), Reload (R), Home (H)
   - Scrolling: mouse wheel, arrow keys, Page Up/Down, Space
   - Keyboard: F5 reload, Enter in URL bar to navigate
+  - Bare domains auto-prefixed with https://
 
   CLI mode:
   pane_cli.exe mypage.html
+
+NETWORKING
+----------
+  Uses native WinHTTP API (no OpenSSL dependency).
+  Supports HTTPS, redirects, and chunked transfer encoding.
+  16 MB response body limit.
 
 NOTE
 ----

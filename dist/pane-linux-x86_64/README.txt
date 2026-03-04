@@ -27,24 +27,26 @@ QUICK START
 
 DEPENDENCIES
 ------------
-  GTK3, Cairo, FreeType2, Fontconfig (all standard on most desktops)
+  GTK3, Cairo, FreeType2, Fontconfig, OpenSSL (all standard on most desktops)
 
   Ubuntu/Debian:
-    sudo apt install libgtk-3-0 libcairo2 libfreetype6 libfontconfig1
+    sudo apt install libgtk-3-0 libcairo2 libfreetype6 libfontconfig1 libssl3
 
   Fedora:
-    sudo dnf install gtk3 cairo freetype fontconfig
+    sudo dnf install gtk3 cairo freetype fontconfig openssl
 
   Arch Linux:
-    sudo pacman -S gtk3 cairo freetype2 fontconfig
+    sudo pacman -S gtk3 cairo freetype2 fontconfig openssl
 
 BROWSER FEATURES
 ----------------
+  - HTTP/HTTPS: type any URL (e.g. google.com) to fetch web pages
   - Tab bar: Ctrl+T (new), Ctrl+W (close), Ctrl+Tab (switch)
   - Navigation: Alt+Left (back), Alt+Right (forward), F5 (reload)
   - Address bar: Ctrl+L to focus, Enter to navigate
   - Scrolling: Mouse wheel, arrow keys, Page Up/Down, Space, Home/End
-  - Input: file:// paths, local files, inline HTML, about:home
+  - Input: http(s):// URLs, file:// paths, inline HTML, about:home
+  - Bare domains auto-prefixed with https://
 
 RENDERING ENGINE
 ----------------

@@ -93,6 +93,11 @@ if(WIN32)
         message(STATUS "FreeType not found — building without font rendering")
     endif()
 
+    # HTTP client library (WinHTTP)
+    add_library(pane_net src/net/http_win32.c)
+    target_include_directories(pane_net PUBLIC ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(pane_net PUBLIC winhttp)
+
     # Font library (optional — uses FreeType if available)
     if(Freetype_FOUND)
         add_library(pane_font src/font/font.c)
@@ -111,6 +116,7 @@ if(WIN32)
     target_include_directories(pane PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(pane PRIVATE
         pane_engine
+        pane_net
         gdi32 user32 comctl32
     )
     if(Freetype_FOUND)
