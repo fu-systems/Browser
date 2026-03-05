@@ -15,6 +15,7 @@
 #include "block.h"
 #include "inline.h"
 #include "flex.h"
+#include "grid.h"
 #include "table.h"
 #include "../style/computed.h"
 #include "../style/context.h"
@@ -393,7 +394,10 @@ static LayoutBox *build_layout_box(Document *doc,
                 break;
             }
         }
-        if (all_ws && parent_ctx->formatting_context == FC_BLOCK)
+        if (all_ws && (parent_ctx->formatting_context == FC_BLOCK ||
+                       parent_ctx->formatting_context == FC_GRID ||
+                       parent_ctx->formatting_context == FC_FLEX ||
+                       parent_ctx->formatting_context == FC_TABLE))
             return NULL;
 
         ComputedStyle *text_style = computed_style_create(arena);
@@ -544,6 +548,8 @@ LayoutTree *layout_build(Document *doc,
     tree->root->rect.y = 0;
     if (tree->root->type == BOX_FLEX) {
         layout_flex(tree->root, viewport_width, viewport_height, &tree->arena);
+    } else if (tree->root->type == BOX_GRID) {
+        layout_grid(tree->root, viewport_width, viewport_height, &tree->arena);
     } else if (tree->root->type == BOX_TABLE) {
         layout_table(tree->root, viewport_width, viewport_height, &tree->arena);
     } else {

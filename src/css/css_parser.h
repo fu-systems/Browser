@@ -59,4 +59,7 @@ void css_stylesheet_free(Stylesheet *ss);
 /* Parse a single CSS value from a token stream. */
 CssValue css_parse_value(const char *input, size_t len, Arena *arena);
 
+/* Parse a space-separated list of values (e.g., grid-template-columns: 1fr 1fr 200px). */
+CssValue css_parse_value_list(const char *input, size_t len, Arena *arena);
+
 #endif /* PANE_CSS_PARSER_H */

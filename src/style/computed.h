@@ -129,6 +129,15 @@ typedef enum {
     FLEXWRAP_WRAP_REVERSE,
 } FlexWrap;
 
+/* ── Grid Auto Flow ────────────────────────────────────────────────── */
+
+typedef enum {
+    GRID_FLOW_ROW,
+    GRID_FLOW_COLUMN,
+    GRID_FLOW_ROW_DENSE,
+    GRID_FLOW_COLUMN_DENSE,
+} GridAutoFlow;
+
 /* ── Box Sizing ────────────────────────────────────────────────────── */
 
 typedef enum {
@@ -218,6 +227,21 @@ struct ComputedStyle {
     CssValue      align_items;
     CssValue      align_self;
     CssValue      justify_content;
+
+    /* Grid */
+    CssValue     grid_template_columns;  /* VAL_NONE or VAL_LIST of track sizes */
+    CssValue     grid_template_rows;     /* VAL_NONE or VAL_LIST of track sizes */
+    CssValue     grid_auto_columns;      /* auto track size */
+    CssValue     grid_auto_rows;         /* auto track size */
+    CssValue     grid_column_start;      /* line number or auto */
+    CssValue     grid_column_end;        /* line number or auto */
+    CssValue     grid_row_start;         /* line number or auto */
+    CssValue     grid_row_end;           /* line number or auto */
+    CssValue     row_gap;
+    CssValue     column_gap;
+    CssValue     justify_items;
+    CssValue     align_content;
+    GridAutoFlow grid_auto_flow;
 
     /* Z-index */
     CssValue     z_index;

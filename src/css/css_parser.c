@@ -184,6 +184,64 @@ CssValue css_parse_value(const char *input, size_t len, Arena *arena)
     }
 }
 
+/* ── Value list parsing (space-separated) ─────────────────────────── */
+
+CssValue css_parse_value_list(const char *input, size_t len, Arena *arena)
+{
+    CssTokenizer t;
+    css_tokenizer_init(&t, input, len);
+
+    CssValue items[64];
+    int count = 0;
+
+    CssToken tok;
+    while (css_tokenizer_next(&t, &tok)) {
+        if (tok.type == CSSTOK_EOF) break;
+        if (tok.type == CSSTOK_WHITESPACE) continue;
+        if (tok.type == CSSTOK_SEMICOLON || tok.type == CSSTOK_RBRACE) break;
+        if (count >= 64) break;
+
+        switch (tok.type) {
+        case CSSTOK_IDENT:
+            if (str_eq_ci(tok.start, tok.len, "auto"))
+                items[count++] = css_value_auto;
+            else
+                items[count++] = (CssValue){
+                    .type = VAL_KEYWORD,
+                    .string = arena_strndup(arena, tok.start, tok.len),
+                };
+            break;
+        case CSSTOK_NUMBER:
+            items[count++] = (CssValue){ .type = VAL_NUMBER, .number = tok.num_value };
+            break;
+        case CSSTOK_DIMENSION:
+            items[count++] = (CssValue){
+                .type = VAL_LENGTH,
+                .length = {
+                    .magnitude = tok.num_value,
+                    .unit = unit_from_name(tok.unit_start, tok.unit_len),
+                },
+            };
+            break;
+        case CSSTOK_PERCENTAGE:
+            items[count++] = (CssValue){ .type = VAL_PERCENTAGE, .percentage = tok.num_value };
+            break;
+        default:
+            break;
+        }
+    }
+
+    if (count == 0) return css_value_none;
+    if (count == 1) return items[0];
+
+    CssValue *list_items = arena_alloc(arena, count * sizeof(CssValue), 8);
+    memcpy(list_items, items, count * sizeof(CssValue));
+    return (CssValue){
+        .type = VAL_LIST,
+        .list = { .items = list_items, .count = count },
+    };
+}
+
 /* ── Declaration Parsing ────────────────────────────────────────────── */
 
 static void declblock_push(DeclBlock *db, CssDeclaration decl, Arena *arena)
@@ -260,7 +318,14 @@ static void parse_declarations(CssTokenizer *t, DeclBlock *db, Arena *arena)
         }
 
         size_t value_len = value_end_pos - (value_start - t->input);
-        CssValue value = css_parse_value(value_start, value_len, arena);
+        CssValue value;
+        /* Grid track lists need multi-value parsing. */
+        if (prop_id == CSS_PROP_GRID_TEMPLATE_COLUMNS ||
+            prop_id == CSS_PROP_GRID_TEMPLATE_ROWS) {
+            value = css_parse_value_list(value_start, value_len, arena);
+        } else {
+            value = css_parse_value(value_start, value_len, arena);
+        }
 
         if (prop_id != CSS_PROP_NONE) {
             CssDeclaration decl = {

@@ -52,6 +52,19 @@ static ComputedStyle initial_style = {
     .align_items    = { .type = VAL_KEYWORD },
     .align_self     = { .type = VAL_AUTO },
     .justify_content = { .type = VAL_KEYWORD },
+    .grid_template_columns = { .type = VAL_NONE },
+    .grid_template_rows    = { .type = VAL_NONE },
+    .grid_auto_columns     = { .type = VAL_AUTO },
+    .grid_auto_rows        = { .type = VAL_AUTO },
+    .grid_column_start     = { .type = VAL_AUTO },
+    .grid_column_end       = { .type = VAL_AUTO },
+    .grid_row_start        = { .type = VAL_AUTO },
+    .grid_row_end          = { .type = VAL_AUTO },
+    .row_gap               = { .type = VAL_NONE },
+    .column_gap            = { .type = VAL_NONE },
+    .justify_items         = { .type = VAL_KEYWORD },
+    .align_content         = { .type = VAL_KEYWORD },
+    .grid_auto_flow        = GRID_FLOW_ROW,
     .z_index        = { .type = VAL_AUTO },
     .has_transform  = false,
 };
@@ -261,6 +274,17 @@ static FlexWrap parse_flex_wrap(const CssValue *val)
     return FLEXWRAP_NOWRAP;
 }
 
+static GridAutoFlow parse_grid_auto_flow(const CssValue *val)
+{
+    if (!val || val->type != VAL_KEYWORD || !val->string) return GRID_FLOW_ROW;
+    const char *s = val->string;
+    if (strcmp(s, "column") == 0)       return GRID_FLOW_COLUMN;
+    if (strcmp(s, "row dense") == 0)    return GRID_FLOW_ROW_DENSE;
+    if (strcmp(s, "column dense") == 0) return GRID_FLOW_COLUMN_DENSE;
+    if (strcmp(s, "dense") == 0)        return GRID_FLOW_ROW_DENSE;
+    return GRID_FLOW_ROW;
+}
+
 static CssColor resolve_color(const CssValue *val, CssColor inherited)
 {
     if (!val) return inherited;
@@ -373,6 +397,19 @@ void computed_style_resolve(ComputedStyle *style,
     style->flex_grow      = 0.0f;
     style->flex_shrink    = 1.0f;
     style->flex_basis     = (CssValue){ .type = VAL_AUTO };
+    style->grid_template_columns = (CssValue){ .type = VAL_NONE };
+    style->grid_template_rows    = (CssValue){ .type = VAL_NONE };
+    style->grid_auto_columns     = (CssValue){ .type = VAL_AUTO };
+    style->grid_auto_rows        = (CssValue){ .type = VAL_AUTO };
+    style->grid_column_start     = (CssValue){ .type = VAL_AUTO };
+    style->grid_column_end       = (CssValue){ .type = VAL_AUTO };
+    style->grid_row_start        = (CssValue){ .type = VAL_AUTO };
+    style->grid_row_end          = (CssValue){ .type = VAL_AUTO };
+    style->row_gap               = (CssValue){ .type = VAL_NONE };
+    style->column_gap            = (CssValue){ .type = VAL_NONE };
+    style->justify_items         = (CssValue){ .type = VAL_KEYWORD };
+    style->align_content         = (CssValue){ .type = VAL_KEYWORD };
+    style->grid_auto_flow        = GRID_FLOW_ROW;
     style->z_index        = (CssValue){ .type = VAL_AUTO };
     style->has_transform  = false;
     style->border_top_style = style->border_right_style =
@@ -574,6 +611,55 @@ void computed_style_resolve(ComputedStyle *style,
             break;
         case CSS_PROP_TRANSFORM:
             style->has_transform = (val->type != VAL_NONE);
+            break;
+        case CSS_PROP_GRID_TEMPLATE_COLUMNS:
+            style->grid_template_columns = *val;
+            break;
+        case CSS_PROP_GRID_TEMPLATE_ROWS:
+            style->grid_template_rows = *val;
+            break;
+        case CSS_PROP_GRID_AUTO_COLUMNS:
+            style->grid_auto_columns = *val;
+            break;
+        case CSS_PROP_GRID_AUTO_ROWS:
+            style->grid_auto_rows = *val;
+            break;
+        case CSS_PROP_GRID_AUTO_FLOW:
+            style->grid_auto_flow = parse_grid_auto_flow(val);
+            break;
+        case CSS_PROP_GRID_COLUMN_START:
+            style->grid_column_start = *val;
+            break;
+        case CSS_PROP_GRID_COLUMN_END:
+            style->grid_column_end = *val;
+            break;
+        case CSS_PROP_GRID_ROW_START:
+            style->grid_row_start = *val;
+            break;
+        case CSS_PROP_GRID_ROW_END:
+            style->grid_row_end = *val;
+            break;
+        case CSS_PROP_ROW_GAP:
+            style->row_gap = *val;
+            break;
+        case CSS_PROP_COLUMN_GAP:
+            style->column_gap = *val;
+            break;
+        case CSS_PROP_JUSTIFY_ITEMS:
+            style->justify_items = *val;
+            break;
+        case CSS_PROP_ALIGN_CONTENT:
+            style->align_content = *val;
+            break;
+        case CSS_PROP_GAP:
+            style->row_gap = *val;
+            style->column_gap = *val;
+            break;
+        case CSS_PROP_GRID_COLUMN:
+            style->grid_column_start = *val;
+            break;
+        case CSS_PROP_GRID_ROW:
+            style->grid_row_start = *val;
             break;
         case CSS_PROP_WRITING_MODE:
             if (val->type == VAL_KEYWORD && val->string) {
