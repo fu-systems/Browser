@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 800px; }
+.page { display: flex; width: 800px; }
+.sidebar { width: 200px; padding: 20px; }
+.sidebar-item { display: block; width: 160px; height: 30px; margin: 0 0 5px 0; padding: 5px 10px; }
+.main { flex: 1; padding: 20px; }
+.article { display: block; width: 100%; margin: 0 0 20px 0; padding: 15px; border: 1px solid #ddd; }
+.article-title { display: block; height: 28px; margin: 0 0 10px 0; }
+.article-text { display: block; height: 60px; }
+</style>
+</head>
+<body>
+<div id="page" class="page">
+  <div id="sidebar" class="sidebar">
+    <div id="sitem1" class="sidebar-item">Menu 1</div>
+    <div id="sitem2" class="sidebar-item">Menu 2</div>
+    <div id="sitem3" class="sidebar-item">Menu 3</div>
+  </div>
+  <div id="main" class="main">
+    <div id="article1" class="article">
+      <div id="atitle1" class="article-title">Article Title</div>
+      <div id="atext1" class="article-text">Article body text</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -211,4 +211,15 @@ else()
         pane_font
         m
     )
+
+    # Real-world site test harness (Stage 6)
+    add_executable(pane_site_test tests/site_test.c)
+    target_include_directories(pane_site_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    target_link_libraries(pane_site_test PRIVATE
+        pane_engine
+        pane_font
+        m
+    )
 endif()

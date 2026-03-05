@@ -563,10 +563,7 @@ void computed_style_resolve(ComputedStyle *style,
             style->box_sizing = parse_box_sizing(val);
             break;
         case CSS_PROP_OVERFLOW_X:
-        case CSS_PROP_OVERFLOW:
             style->overflow_x = parse_overflow(val);
-            if (prop == CSS_PROP_OVERFLOW)
-                style->overflow_y = style->overflow_x;
             break;
         case CSS_PROP_OVERFLOW_Y:
             style->overflow_y = parse_overflow(val);

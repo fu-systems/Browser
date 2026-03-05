@@ -351,6 +351,11 @@ static void handle_initial(TreeBuilder *tb, HtmlToken *tok)
 
 static void handle_before_html(TreeBuilder *tb, HtmlToken *tok)
 {
+    if (tok->type == TOK_CHARACTER &&
+        (tok->ch_data[0] == ' ' || tok->ch_data[0] == '\t' ||
+         tok->ch_data[0] == '\n' || tok->ch_data[0] == '\f'))
+        return; /* Ignore whitespace. */
+
     if (tok->type == TOK_START_TAG &&
         strncmp(tok->tag_name, "html", tok->tag_name_len) == 0) {
         DomNode *html = insert_element_for_token(tb, tok);
