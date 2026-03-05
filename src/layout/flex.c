@@ -75,6 +75,22 @@ static AlignItems parse_align(const CssValue *val)
     return AI_STRETCH;
 }
 
+/* ── Position relative helper ──────────────────────────────────────── */
+
+static void flex_apply_relative(LayoutBox *child, float cw, float ch)
+{
+    if (!child->style || child->style->position != POSITION_RELATIVE) return;
+    float fs = child->style->font_size;
+    if (child->style->top.type != VAL_AUTO)
+        child->rect.y += flex_resolve_len(child->style->top, fs, ch);
+    else if (child->style->bottom.type != VAL_AUTO)
+        child->rect.y -= flex_resolve_len(child->style->bottom, fs, ch);
+    if (child->style->left.type != VAL_AUTO)
+        child->rect.x += flex_resolve_len(child->style->left, fs, cw);
+    else if (child->style->right.type != VAL_AUTO)
+        child->rect.x -= flex_resolve_len(child->style->right, fs, cw);
+}
+
 /* ── Inline type check ─────────────────────────────────────────────── */
 
 static bool flex_is_inline(LayoutBoxType t)
@@ -414,6 +430,8 @@ void layout_flex(LayoutBox *box, float containing_width, float containing_height
             c->rect.x = cross_pos + c->margin.left + c->border.left + c->padding.left;
             c->rect.y = main_start + c->margin.top + c->border.top + c->padding.top;
         }
+
+        flex_apply_relative(c, content_w, content_h);
 
         if (is_reverse) {
             main_pos -= child_outer_main + gap;

@@ -243,9 +243,22 @@ static void render_box(CairoRenderer *r, const LayoutBox *box,
         }
     }
 
+    /* Clip children if overflow is hidden. */
+    bool needs_clip = s && (s->overflow_x == OVERFLOW_HIDDEN ||
+                            s->overflow_y == OVERFLOW_HIDDEN);
+    if (needs_clip) {
+        cairo_save(cr);
+        cairo_rectangle(cr, sx, sy, bw, bh);
+        cairo_clip(cr);
+    }
+
     /* Render children. */
     for (LayoutBox *child = box->first_child; child; child = child->next_sibling) {
         render_box(r, child, x, y);
+    }
+
+    if (needs_clip) {
+        cairo_restore(cr);
     }
 }
 

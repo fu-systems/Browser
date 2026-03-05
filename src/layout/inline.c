@@ -126,9 +126,12 @@ void layout_inline(LayoutBox *box, float available_width, Arena *arena)
                 cur_line_h = line_h;
             }
 
-            child->rect.x = x;
-            child->rect.y = y;
-            x += child->rect.width;
+            child->rect.x = x + child->margin.left + child->border.left + child->padding.left;
+            child->rect.y = y + child->margin.top + child->border.top + child->padding.top;
+            float child_outer_w = child->rect.width + child->padding.left + child->padding.right
+                                + child->border.left + child->border.right
+                                + child->margin.left + child->margin.right;
+            x += child_outer_w;
             if (child_h > cur_line_h) cur_line_h = child_h;
         }
 

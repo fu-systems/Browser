@@ -10,6 +10,7 @@
 #include "flex.h"
 #include "grid.h"
 #include "table.h"
+#include "../dom/dom.h"
 #include <math.h>
 
 /* ── Resolve length to pixels ──────────────────────────────────────── */
@@ -171,6 +172,22 @@ static float collapse_margins(float margin_a, float margin_b)
     return margin_a + margin_b;
 }
 
+/* ── Position Relative Offsets ──────────────────────────────────────── */
+
+static void apply_relative_offset(LayoutBox *child, float containing_w, float containing_h)
+{
+    if (!child->style || child->style->position != POSITION_RELATIVE) return;
+    float fs = child->style->font_size;
+    if (child->style->top.type != VAL_AUTO)
+        child->rect.y += resolve_len(child->style->top, fs, containing_h);
+    else if (child->style->bottom.type != VAL_AUTO)
+        child->rect.y -= resolve_len(child->style->bottom, fs, containing_h);
+    if (child->style->left.type != VAL_AUTO)
+        child->rect.x += resolve_len(child->style->left, fs, containing_w);
+    else if (child->style->right.type != VAL_AUTO)
+        child->rect.x -= resolve_len(child->style->right, fs, containing_w);
+}
+
 /* ── Child Layout ──────────────────────────────────────────────────── */
 
 static bool is_inline_type(LayoutBoxType t)
@@ -183,10 +200,67 @@ static void layout_children(LayoutBox *box, Arena *arena)
     float cursor_y = 0;
     float prev_margin_bottom = 0;
     float content_width = box->rect.width;
+    float float_max_bottom = 0;  /* Track the bottom of floated elements. */
 
     for (LayoutBox *child = box->first_child; child; child = child->next_sibling) {
         if (child->style && child->style->display == DISPLAY_NONE)
             continue;
+
+        /* Absolutely/fixed positioned elements are out of normal flow.
+         * Lay them out but don't advance cursor_y. */
+        if (child->style && (child->style->position == POSITION_ABSOLUTE ||
+                             child->style->position == POSITION_FIXED)) {
+            layout_block(child, content_width, box->rect.height, arena);
+
+            /* Position using top/left if specified, otherwise at current cursor. */
+            float abs_x = 0, abs_y = 0;
+            float fs = child->style->font_size;
+            if (child->style->left.type != VAL_AUTO)
+                abs_x = resolve_len(child->style->left, fs, content_width);
+            if (child->style->top.type != VAL_AUTO)
+                abs_y = resolve_len(child->style->top, fs, box->rect.height);
+            if (child->style->right.type != VAL_AUTO && child->style->left.type == VAL_AUTO) {
+                float r_val = resolve_len(child->style->right, fs, content_width);
+                abs_x = content_width - child->rect.width
+                      - child->padding.left - child->padding.right
+                      - child->border.left - child->border.right
+                      - child->margin.left - child->margin.right - r_val;
+            }
+            if (child->style->bottom.type != VAL_AUTO && child->style->top.type == VAL_AUTO) {
+                float b_val = resolve_len(child->style->bottom, fs, box->rect.height);
+                abs_y = box->rect.height - child->rect.height
+                      - child->padding.top - child->padding.bottom
+                      - child->border.top - child->border.bottom
+                      - child->margin.top - child->margin.bottom - b_val;
+            }
+
+            child->rect.x = abs_x + child->margin.left + child->border.left + child->padding.left;
+            child->rect.y = abs_y + child->margin.top + child->border.top + child->padding.top;
+            continue;
+        }
+
+        /* Floated elements: position at left/right edge, out of normal flow. */
+        if (child->style && child->style->float_val != FLOAT_NONE) {
+            layout_block(child, content_width, box->rect.height, arena);
+            float outer_w = layout_box_outer_width(child);
+
+            if (child->style->float_val == FLOAT_RIGHT) {
+                child->rect.x = content_width - outer_w +
+                                child->margin.left + child->border.left + child->padding.left;
+            } else {
+                child->rect.x = child->margin.left + child->border.left + child->padding.left;
+            }
+            child->rect.y = cursor_y + child->margin.top + child->border.top + child->padding.top;
+
+            /* Track float extent for auto height calculation. */
+            float float_bottom = child->rect.y + child->rect.height +
+                                 child->padding.bottom + child->border.bottom +
+                                 child->margin.bottom;
+            if (float_bottom > float_max_bottom)
+                float_max_bottom = float_bottom;
+            apply_relative_offset(child, content_width, box->rect.height);
+            continue;
+        }
 
         if (is_inline_type(child->type)) {
             /* ── Inline formatting context: flow consecutive inline children
@@ -206,6 +280,32 @@ static void layout_children(LayoutBox *box, Arena *arena)
                     continue;
                 if (!is_inline_type(child->type))
                     break;
+
+                /* Handle <br>: force a line break. */
+                if (child->node && child->node->type == PANE_NODE_ELEMENT &&
+                    child->node->elem.tag == TAG_BR) {
+                    /* Apply text-align to the current line before breaking. */
+                    if ((align == TEXT_ALIGN_CENTER || align == TEXT_ALIGN_RIGHT ||
+                         align == TEXT_ALIGN_END) && line_start) {
+                        float offset = content_width - x;
+                        if (align == TEXT_ALIGN_CENTER) offset /= 2.0f;
+                        if (offset > 0) {
+                            for (LayoutBox *lc = line_start; lc && lc != child;
+                                 lc = lc->next_sibling) {
+                                if (lc->style && lc->style->display == DISPLAY_NONE)
+                                    continue;
+                                lc->rect.x += offset;
+                            }
+                        }
+                    }
+                    cursor_y += line_h > 0 ? line_h : default_line_h;
+                    x = 0;
+                    line_h = 0;
+                    line_start = NULL;
+                    child->rect.width = 0;
+                    child->rect.height = 0;
+                    continue;
+                }
 
                 layout_inline(child, content_width, arena);
 
@@ -241,8 +341,8 @@ static void layout_children(LayoutBox *box, Arena *arena)
 
                 if (!line_start) line_start = child;
 
-                child->rect.x = x;
-                child->rect.y = cursor_y;
+                child->rect.x = x + child->margin.left + child->border.left + child->padding.left;
+                child->rect.y = cursor_y + child->margin.top + child->border.top + child->padding.top;
                 x += child_outer_w;
                 if (child_outer_h > line_h) line_h = child_outer_h;
             }
@@ -285,6 +385,7 @@ static void layout_children(LayoutBox *box, Arena *arena)
             cursor_y = child->rect.y + child->rect.height +
                        child->padding.bottom + child->border.bottom;
             prev_margin_bottom = child->margin.bottom;
+            apply_relative_offset(child, content_width, box->rect.height);
             break;
         }
 
@@ -300,6 +401,7 @@ static void layout_children(LayoutBox *box, Arena *arena)
             cursor_y = child->rect.y + child->rect.height +
                        child->padding.bottom + child->border.bottom;
             prev_margin_bottom = child->margin.bottom;
+            apply_relative_offset(child, content_width, box->rect.height);
             break;
         }
 
@@ -315,6 +417,7 @@ static void layout_children(LayoutBox *box, Arena *arena)
             cursor_y = child->rect.y + child->rect.height +
                        child->padding.bottom + child->border.bottom;
             prev_margin_bottom = child->margin.bottom;
+            apply_relative_offset(child, content_width, box->rect.height);
             break;
         }
 
@@ -331,6 +434,7 @@ static void layout_children(LayoutBox *box, Arena *arena)
             cursor_y = child->rect.y + child->rect.height +
                        child->padding.bottom + child->border.bottom;
             prev_margin_bottom = child->margin.bottom;
+            apply_relative_offset(child, content_width, box->rect.height);
             break;
         }
 
@@ -341,12 +445,16 @@ static void layout_children(LayoutBox *box, Arena *arena)
             child->rect.y = cursor_y;
             cursor_y += layout_box_outer_height(child);
             prev_margin_bottom = 0;
+            apply_relative_offset(child, content_width, box->rect.height);
             break;
         }
     }
 
-    /* Auto height: set to content height. */
+    /* Auto height: set to content height, including float extents. */
     if (box->style && box->style->height.type == VAL_AUTO) {
-        box->rect.height = cursor_y + prev_margin_bottom;
+        float content_h = cursor_y + prev_margin_bottom;
+        if (float_max_bottom > content_h)
+            content_h = float_max_bottom;
+        box->rect.height = content_h;
     }
 }

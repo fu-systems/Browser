@@ -91,6 +91,17 @@ typedef struct {
     int        row_count;
 } TableRows;
 
+/* Check if a box is a row group (THEAD, TBODY, TFOOT) by display property.
+ * These share BOX_TABLE_ROW type with TR, so we must check display. */
+static bool is_row_group(LayoutBox *box)
+{
+    if (!box->style) return false;
+    Display d = box->style->display;
+    return d == DISPLAY_TABLE_ROW_GROUP ||
+           d == DISPLAY_TABLE_HEADER_GROUP ||
+           d == DISPLAY_TABLE_FOOTER_GROUP;
+}
+
 /* Recursively collect actual row boxes (skip row groups like THEAD/TBODY). */
 static void collect_rows(LayoutBox *box, TableRows *out)
 {
@@ -105,11 +116,14 @@ static void collect_rows(LayoutBox *box, TableRows *out)
             return;
         }
 
-        if (is_table_row(child)) {
+        if (is_row_group(child)) {
+            /* Row group (THEAD, TBODY, TFOOT) — descend into it. */
+            collect_rows(child, out);
+        } else if (is_table_row(child)) {
             if (out->row_count < 256)
                 out->rows[out->row_count++] = child;
         } else {
-            /* Row group (THEAD, TBODY, TFOOT) — descend into it. */
+            /* Unknown wrapper — try descending. */
             collect_rows(child, out);
         }
     }
@@ -268,14 +282,14 @@ void layout_table(LayoutBox *box, float containing_width, float containing_heigh
 
     /* ── Phase 2: Lay out rows and cells ───────────────────────────── */
 
-    float cursor_y = box->padding.top + cellspacing;
+    float cursor_y = cellspacing;
 
     for (int r = 0; r < trows.row_count; r++) {
         LayoutBox *row = trows.rows[r];
         int nc = count_cells(row);
 
         /* Position each cell. */
-        float cursor_x = box->padding.left + cellspacing;
+        float cursor_x = cellspacing;
         float row_height = 0;
 
         for (int c = 0; c < nc && c < num_cols; c++) {
@@ -306,7 +320,7 @@ void layout_table(LayoutBox *box, float containing_width, float containing_heigh
             if (cell->rect.width < 0) cell->rect.width = 0;
 
             cell->rect.x = cursor_x + cell->margin.left + cell->border.left + cell->padding.left;
-            cell->rect.y = cursor_y + cell->margin.top + cell->border.top + cell->padding.top;
+            cell->rect.y = cell->margin.top + cell->border.top + cell->padding.top;
 
             float cell_outer_h = cell->rect.height
                 + cell->padding.top + cell->padding.bottom
@@ -343,7 +357,7 @@ void layout_table(LayoutBox *box, float containing_width, float containing_heigh
     }
 
     /* Set table height. */
-    float content_h = cursor_y + box->padding.bottom;
+    float content_h = cursor_y;
     if (s && s->height.type != VAL_AUTO) {
         float specified_h = resolve_len(s->height, fs, containing_height);
         if (specified_h > content_h) content_h = specified_h;

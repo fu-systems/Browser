@@ -39,6 +39,22 @@ static float grid_resolve_len(CssValue val, float font_size, float containing)
     }
 }
 
+/* ── Position relative helper ──────────────────────────────────────── */
+
+static void grid_apply_relative(LayoutBox *child, float cw, float ch)
+{
+    if (!child->style || child->style->position != POSITION_RELATIVE) return;
+    float fs = child->style->font_size;
+    if (child->style->top.type != VAL_AUTO)
+        child->rect.y += grid_resolve_len(child->style->top, fs, ch);
+    else if (child->style->bottom.type != VAL_AUTO)
+        child->rect.y -= grid_resolve_len(child->style->bottom, fs, ch);
+    if (child->style->left.type != VAL_AUTO)
+        child->rect.x += grid_resolve_len(child->style->left, fs, cw);
+    else if (child->style->right.type != VAL_AUTO)
+        child->rect.x -= grid_resolve_len(child->style->right, fs, cw);
+}
+
 /* ── Track sizing ──────────────────────────────────────────────────── */
 
 typedef struct {
@@ -731,6 +747,7 @@ void layout_grid(LayoutBox *box, float containing_width, float containing_height
 
         c->rect.x = cell_x + x_offset + c->margin.left + c->border.left + c->padding.left;
         c->rect.y = cell_y + y_offset + c->margin.top + c->border.top + c->padding.top;
+        grid_apply_relative(c, content_w, box->rect.height);
     }
 
     /* ── Set container height ─────────────────────────────────────── */
