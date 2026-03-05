@@ -200,4 +200,15 @@ else()
         ${CAIRO_LIBRARIES}
         m
     )
+
+    # Layout test harness (Stage 4)
+    add_executable(pane_layout_test tests/layout_test.c)
+    target_include_directories(pane_layout_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    target_link_libraries(pane_layout_test PRIVATE
+        pane_engine
+        pane_font
+        m
+    )
 endif()

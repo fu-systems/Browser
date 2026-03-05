@@ -44,6 +44,10 @@ typedef struct {
     TokenAttr attrs[MAX_ATTRS];
     uint16_t  attr_count;
 
+    /* Storage pool for attribute name/value data (attrs point here). */
+    char     attr_data[8192];
+    size_t   attr_data_len;
+
     /* For CHARACTER. */
     char     ch_data[TOKEN_BUF_SIZE];
     size_t   ch_len;

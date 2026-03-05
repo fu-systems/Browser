@@ -231,11 +231,25 @@ static void add_attr_to_token(HtmlToken *out, const char *name, size_t nlen,
                               const char *value, size_t vlen)
 {
     if (out->attr_count >= MAX_ATTRS) return;
+    /* Copy name and value into the token's own storage pool so each
+     * attribute has its own copy (the tokenizer reuses its buffers). */
+    size_t need = nlen + 1 + vlen + 1;
+    if (out->attr_data_len + need > sizeof(out->attr_data)) return;
+
     TokenAttr *a = &out->attrs[out->attr_count++];
-    a->name = name;
+    char *dst = out->attr_data + out->attr_data_len;
+    memcpy(dst, name, nlen);
+    dst[nlen] = '\0';
+    a->name = dst;
     a->name_len = nlen;
-    a->value = value;
+    out->attr_data_len += nlen + 1;
+
+    dst = out->attr_data + out->attr_data_len;
+    memcpy(dst, value, vlen);
+    dst[vlen] = '\0';
+    a->value = dst;
     a->value_len = vlen;
+    out->attr_data_len += vlen + 1;
 }
 
 static bool match_str(HtmlTokenizer *t, const char *s, size_t len)

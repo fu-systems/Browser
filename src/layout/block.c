@@ -278,10 +278,9 @@ static void layout_children(LayoutBox *box, Arena *arena)
 
             /* Margin collapsing: collapse top margin with previous bottom. */
             float collapsed = collapse_margins(prev_margin_bottom, child->margin.top);
-            cursor_y += collapsed - prev_margin_bottom;
 
             child->rect.x = child->margin.left + child->border.left + child->padding.left;
-            child->rect.y = cursor_y + child->margin.top + child->border.top + child->padding.top;
+            child->rect.y = cursor_y + collapsed + child->border.top + child->padding.top;
 
             cursor_y = child->rect.y + child->rect.height +
                        child->padding.bottom + child->border.bottom;
@@ -294,10 +293,9 @@ static void layout_children(LayoutBox *box, Arena *arena)
 
             /* Margin collapsing: collapse top margin with previous bottom. */
             float collapsed = collapse_margins(prev_margin_bottom, child->margin.top);
-            cursor_y += collapsed - prev_margin_bottom;
 
             child->rect.x = child->margin.left + child->border.left + child->padding.left;
-            child->rect.y = cursor_y + child->margin.top + child->border.top + child->padding.top;
+            child->rect.y = cursor_y + collapsed + child->border.top + child->padding.top;
 
             cursor_y = child->rect.y + child->rect.height +
                        child->padding.bottom + child->border.bottom;
@@ -310,10 +308,9 @@ static void layout_children(LayoutBox *box, Arena *arena)
 
             /* Margin collapsing: collapse top margin with previous bottom. */
             float collapsed = collapse_margins(prev_margin_bottom, child->margin.top);
-            cursor_y += collapsed - prev_margin_bottom;
 
             child->rect.x = child->margin.left + child->border.left + child->padding.left;
-            child->rect.y = cursor_y + child->margin.top + child->border.top + child->padding.top;
+            child->rect.y = cursor_y + collapsed + child->border.top + child->padding.top;
 
             cursor_y = child->rect.y + child->rect.height +
                        child->padding.bottom + child->border.bottom;
@@ -327,10 +324,9 @@ static void layout_children(LayoutBox *box, Arena *arena)
 
             /* Margin collapsing: collapse top margin with previous bottom. */
             float collapsed = collapse_margins(prev_margin_bottom, child->margin.top);
-            cursor_y += collapsed - prev_margin_bottom;
 
             child->rect.x = child->margin.left + child->border.left + child->padding.left;
-            child->rect.y = cursor_y + child->margin.top + child->border.top + child->padding.top;
+            child->rect.y = cursor_y + collapsed + child->border.top + child->padding.top;
 
             cursor_y = child->rect.y + child->rect.height +
                        child->padding.bottom + child->border.bottom;

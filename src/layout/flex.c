@@ -179,10 +179,9 @@ void layout_flex(LayoutBox *box, float containing_width, float containing_height
         if (c->style && c->style->display == DISPLAY_NONE) continue;
 
         if (flex_is_inline(c->type)) {
-            layout_inline(c, is_row ? content_w : content_h, arena);
+            layout_inline(c, content_w, arena);
         } else {
-            layout_block(c, is_row ? content_w : content_h,
-                        is_row ? content_h : content_w, arena);
+            layout_block(c, content_w, content_h, arena);
         }
 
         /* Resolve child's flex-basis. */
@@ -225,6 +224,10 @@ void layout_flex(LayoutBox *box, float containing_width, float containing_height
         total_shrink += shrink;
     }
 
+    /* For column flex with auto height, use children's total as main size
+     * (container grows to fit — no shrinking). */
+    if (!is_row && specified_h < 0) main_size = total_main;
+
     /* Distribute free space via flex-grow/shrink. */
     float free_space = main_size - total_main;
 
@@ -244,10 +247,16 @@ void layout_flex(LayoutBox *box, float containing_width, float containing_height
             float grow = c->style ? c->style->flex_grow : 0;
             if (grow <= 0) continue;
             if (flex_is_inline(c->type)) {
-                layout_inline(c, is_row ? c->rect.width : c->rect.height, arena);
+                layout_inline(c, is_row ? c->rect.width : content_w, arena);
             } else {
-                layout_block(c, is_row ? c->rect.width : content_h,
-                            is_row ? content_h : c->rect.height, arena);
+                if (is_row) {
+                    layout_block(c, c->rect.width, content_h, arena);
+                } else {
+                    /* Column: preserve the grown height, relayout at container width. */
+                    float grown_h = c->rect.height;
+                    layout_block(c, content_w, grown_h, arena);
+                    c->rect.height = grown_h;
+                }
             }
         }
         free_space = 0;

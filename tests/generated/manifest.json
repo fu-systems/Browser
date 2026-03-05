@@ -1,0 +1,543 @@
+{
+  "test_count": 35,
+  "categories": {
+    "block": 5,
+    "margin": 2,
+    "inline": 1,
+    "flex": 6,
+    "grid": 5,
+    "table": 1,
+    "context": 5,
+    "css_interaction": 3,
+    "box_model": 4,
+    "nesting": 3
+  },
+  "tests": [
+    {
+      "name": "block_vertical_flow",
+      "category": "block",
+      "description": "Block children stack vertically, each full width",
+      "expected": {
+        "a": {
+          "x": 0,
+          "y": 0,
+          "width": 200,
+          "height": 30
+        },
+        "b": {
+          "x": 0,
+          "y": 30,
+          "width": 200,
+          "height": 40
+        },
+        "c": {
+          "x": 0,
+          "y": 70,
+          "width": 200,
+          "height": 20
+        }
+      }
+    },
+    {
+      "name": "block_auto_margin_center",
+      "category": "block",
+      "description": "Block with auto left+right margins centers horizontally",
+      "expected": {
+        "child": {
+          "x": 100,
+          "y": 0,
+          "width": 200,
+          "height": 50
+        }
+      }
+    },
+    {
+      "name": "block_auto_height",
+      "category": "block",
+      "description": "Auto-height parent wraps children (25+35=60)",
+      "expected": {
+        "parent": {
+          "width": 300,
+          "height": 60
+        }
+      }
+    },
+    {
+      "name": "block_border_box",
+      "category": "block",
+      "description": "border-box: width includes padding+border (content=150x50)",
+      "expected": {
+        "box": {
+          "width": 150,
+          "height": 50
+        }
+      }
+    },
+    {
+      "name": "block_nested_width",
+      "category": "block",
+      "description": "border-box: content area = 400 - 10 - 10 = 380, child fills it",
+      "expected": {
+        "inner": {
+          "width": 380,
+          "height": 30
+        }
+      }
+    },
+    {
+      "name": "margin_collapse_siblings",
+      "category": "margin",
+      "description": "Adjacent sibling margins collapse: max(30,20)=30",
+      "expected": {
+        "a": {
+          "y": 0,
+          "height": 20
+        },
+        "b": {
+          "y": 50,
+          "height": 20
+        }
+      }
+    },
+    {
+      "name": "margin_no_collapse_flex",
+      "category": "margin",
+      "description": "Flex children: margins do not collapse (30+20=50 gap)",
+      "expected": {
+        "a": {
+          "y": 0,
+          "height": 20
+        },
+        "b": {
+          "y": 70,
+          "height": 20
+        }
+      }
+    },
+    {
+      "name": "inline_basic_text",
+      "category": "inline",
+      "description": "Inline spans flow horizontally within block container",
+      "expected": {
+        "parent": {
+          "width": 200
+        }
+      }
+    },
+    {
+      "name": "flex_row_basic",
+      "category": "flex",
+      "description": "Row flex: 3 items of 100px each fill 300px",
+      "expected": {
+        "a": {
+          "x": 0,
+          "y": 0,
+          "width": 100,
+          "height": 50
+        },
+        "b": {
+          "x": 100,
+          "y": 0,
+          "width": 100,
+          "height": 50
+        },
+        "c": {
+          "x": 200,
+          "y": 0,
+          "width": 100,
+          "height": 50
+        }
+      }
+    },
+    {
+      "name": "flex_grow",
+      "category": "flex",
+      "description": "Two flex-grow:1 items split space equally (200px each)",
+      "expected": {
+        "a": {
+          "x": 0,
+          "width": 200,
+          "height": 40
+        },
+        "b": {
+          "x": 200,
+          "width": 200,
+          "height": 40
+        }
+      }
+    },
+    {
+      "name": "flex_column",
+      "category": "flex",
+      "description": "Column flex: items split height by grow ratio (1:2 = 100:200)",
+      "expected": {
+        "a": {
+          "x": 0,
+          "y": 0,
+          "height": 100
+        },
+        "b": {
+          "x": 0,
+          "y": 100,
+          "height": 200
+        }
+      }
+    },
+    {
+      "name": "flex_justify_center",
+      "category": "flex",
+      "description": "justify-content:center \u2192 100px gap on each side",
+      "expected": {
+        "a": {
+          "x": 100,
+          "width": 100,
+          "height": 40
+        },
+        "b": {
+          "x": 200,
+          "width": 100,
+          "height": 40
+        }
+      }
+    },
+    {
+      "name": "flex_justify_space_between",
+      "category": "flex",
+      "description": "space-between: first at 0, last at end",
+      "expected": {
+        "a": {
+          "x": 0,
+          "width": 100
+        },
+        "b": {
+          "x": 300,
+          "width": 100
+        }
+      }
+    },
+    {
+      "name": "flex_align_center",
+      "category": "flex",
+      "description": "align-items:center \u2192 vertically centered (y=30)",
+      "expected": {
+        "a": {
+          "y": 30,
+          "height": 40
+        }
+      }
+    },
+    {
+      "name": "grid_2x2",
+      "category": "grid",
+      "description": "2x2 grid: 100px columns, auto-placed",
+      "expected": {
+        "a": {
+          "x": 0,
+          "y": 0,
+          "width": 100,
+          "height": 30
+        },
+        "b": {
+          "x": 100,
+          "y": 0,
+          "width": 100,
+          "height": 30
+        },
+        "c": {
+          "x": 0,
+          "y": 30,
+          "width": 100,
+          "height": 30
+        },
+        "d": {
+          "x": 100,
+          "y": 30,
+          "width": 100,
+          "height": 30
+        }
+      }
+    },
+    {
+      "name": "grid_fr_units",
+      "category": "grid",
+      "description": "1fr 2fr on 300px \u2192 100px 200px columns",
+      "expected": {
+        "a": {
+          "x": 0,
+          "width": 100,
+          "height": 40
+        },
+        "b": {
+          "x": 100,
+          "width": 200,
+          "height": 40
+        }
+      }
+    },
+    {
+      "name": "grid_gap",
+      "category": "grid",
+      "description": "2x2 grid with 10px gap: cols=100px each, rows 10px apart",
+      "expected": {
+        "a": {
+          "x": 0,
+          "y": 0,
+          "width": 100
+        },
+        "b": {
+          "x": 110,
+          "y": 0,
+          "width": 100
+        },
+        "c": {
+          "x": 0,
+          "y": 30
+        },
+        "d": {
+          "x": 110,
+          "y": 30
+        }
+      }
+    },
+    {
+      "name": "grid_explicit_placement",
+      "category": "grid",
+      "description": "Item A spans columns 2-3, item B auto-placed in col 1",
+      "expected": {
+        "a": {
+          "x": 100,
+          "width": 200,
+          "height": 30
+        },
+        "b": {
+          "x": 0,
+          "y": 0,
+          "width": 100,
+          "height": 30
+        }
+      }
+    },
+    {
+      "name": "grid_mixed_tracks",
+      "category": "grid",
+      "description": "100px fixed + 1fr(300px) columns",
+      "expected": {
+        "a": {
+          "x": 0,
+          "width": 100
+        },
+        "b": {
+          "x": 100,
+          "width": 300
+        }
+      }
+    },
+    {
+      "name": "table_basic",
+      "category": "table",
+      "description": "Basic 2x2 table: cells split width equally",
+      "expected": {
+        "t": {
+          "width": 400
+        }
+      }
+    },
+    {
+      "name": "ctx_block_flex_child",
+      "category": "context",
+      "description": "Flex container inside block: flex items flow horizontally",
+      "expected": {
+        "a": {
+          "x": 0,
+          "y": 0,
+          "width": 100,
+          "height": 30
+        },
+        "b": {
+          "x": 100,
+          "y": 0,
+          "width": 100,
+          "height": 30
+        }
+      }
+    },
+    {
+      "name": "ctx_block_grid_child",
+      "category": "context",
+      "description": "Grid container inside block: items placed in 2-col grid",
+      "expected": {
+        "a": {
+          "x": 0,
+          "width": 200,
+          "height": 30
+        },
+        "b": {
+          "x": 200,
+          "width": 200,
+          "height": 30
+        }
+      }
+    },
+    {
+      "name": "ctx_flex_block_child",
+      "category": "context",
+      "description": "Block inside flex item: inner block fills parent width",
+      "expected": {
+        "block": {
+          "width": 150
+        },
+        "inner": {
+          "width": 150,
+          "height": 20
+        }
+      }
+    },
+    {
+      "name": "ctx_grid_flex_child",
+      "category": "context",
+      "description": "Flex container inside grid cell: items split cell width",
+      "expected": {
+        "a": {
+          "width": 100,
+          "height": 25
+        },
+        "b": {
+          "width": 100,
+          "height": 25
+        }
+      }
+    },
+    {
+      "name": "ctx_deep_nesting",
+      "category": "context",
+      "description": "Grid inside flex inside block: context propagates correctly",
+      "expected": {
+        "a": {
+          "width": 200,
+          "height": 20
+        },
+        "b": {
+          "width": 200,
+          "height": 20
+        }
+      }
+    },
+    {
+      "name": "display_gate_flex_on_block",
+      "category": "css_interaction",
+      "description": "justify-content ignored on block container \u2014 child at x=0",
+      "expected": {
+        "child": {
+          "x": 0,
+          "width": 100,
+          "height": 30
+        }
+      }
+    },
+    {
+      "name": "display_gate_grid_on_block",
+      "category": "css_interaction",
+      "description": "grid-template-columns ignored on block container \u2014 child full width",
+      "expected": {
+        "child": {
+          "width": 200,
+          "height": 30
+        }
+      }
+    },
+    {
+      "name": "display_none",
+      "category": "css_interaction",
+      "description": "display:none element takes no space \u2014 b follows a directly",
+      "expected": {
+        "a": {
+          "y": 0,
+          "height": 20
+        },
+        "b": {
+          "y": 20,
+          "height": 20
+        }
+      }
+    },
+    {
+      "name": "box_padding",
+      "category": "box_model",
+      "description": "Padding: content 200x100, total 220x120",
+      "expected": {
+        "box": {
+          "width": 200,
+          "height": 100
+        }
+      }
+    },
+    {
+      "name": "box_percentage_width",
+      "category": "box_model",
+      "description": "50% width of 400px parent = 200px",
+      "expected": {
+        "child": {
+          "width": 200,
+          "height": 30
+        }
+      }
+    },
+    {
+      "name": "box_min_width",
+      "category": "box_model",
+      "description": "min-width:200px overrides width:100px",
+      "expected": {
+        "child": {
+          "width": 200,
+          "height": 30
+        }
+      }
+    },
+    {
+      "name": "box_max_width",
+      "category": "box_model",
+      "description": "max-width:200px overrides width:300px",
+      "expected": {
+        "child": {
+          "width": 200,
+          "height": 30
+        }
+      }
+    },
+    {
+      "name": "nest_p_h1",
+      "category": "nesting",
+      "description": "h1 after p: both are block children of div",
+      "expected": {
+        "heading": {
+          "width": 400
+        }
+      }
+    },
+    {
+      "name": "nest_table_sections",
+      "category": "nesting",
+      "description": "Table with thead/tbody: rows laid out correctly",
+      "expected": {
+        "t": {
+          "width": 300
+        }
+      }
+    },
+    {
+      "name": "nest_ul_li",
+      "category": "nesting",
+      "description": "List items stack vertically",
+      "expected": {
+        "item1": {
+          "y": 0,
+          "height": 20
+        },
+        "item2": {
+          "y": 20,
+          "height": 20
+        }
+      }
+    }
+  ]
+}

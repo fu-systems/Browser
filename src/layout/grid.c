@@ -13,6 +13,7 @@
 
 #include "grid.h"
 #include "block.h"
+#include "flex.h"
 #include "inline.h"
 #include <string.h>
 #include <math.h>
@@ -497,6 +498,8 @@ void layout_grid(LayoutBox *box, float containing_width, float containing_height
         LayoutBox *c = items[i].box;
         if (grid_is_inline(c->type)) {
             layout_inline(c, content_w, arena);
+        } else if (c->type == BOX_FLEX) {
+            layout_flex(c, content_w, containing_height, arena);
         } else {
             layout_block(c, content_w, containing_height, arena);
         }
@@ -569,6 +572,8 @@ void layout_grid(LayoutBox *box, float containing_width, float containing_height
         LayoutBox *c = items[i].box;
         if (grid_is_inline(c->type)) {
             layout_inline(c, item_avail_w, arena);
+        } else if (c->type == BOX_FLEX) {
+            layout_flex(c, item_avail_w, containing_height, arena);
         } else {
             layout_block(c, item_avail_w, containing_height, arena);
         }
