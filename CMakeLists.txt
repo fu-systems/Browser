@@ -59,6 +59,8 @@ set(PANE_SOURCES
     src/plugin/builtin/privacy_shield.c
     src/plugin/builtin/dark_mode.c
     src/plugin/builtin/cookie_manager.c
+    # Edge-Case Decision Engine
+    src/edge_cases.c
     # Public API
     src/pane.c
 )
@@ -218,6 +220,17 @@ else()
         ${CMAKE_SOURCE_DIR}/src
     )
     target_link_libraries(pane_site_test PRIVATE
+        pane_engine
+        pane_font
+        m
+    )
+
+    # Edge-case decision engine test (Stage 7)
+    add_executable(pane_edge_test tests/edge_case_test.c)
+    target_include_directories(pane_edge_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    target_link_libraries(pane_edge_test PRIVATE
         pane_engine
         pane_font
         m
