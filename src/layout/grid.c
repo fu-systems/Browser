@@ -183,6 +183,16 @@ static bool grid_is_inline(LayoutBoxType t)
     return t == BOX_INLINE || t == BOX_TEXT || t == BOX_INLINE_BLOCK;
 }
 
+/* Check if a child should be skipped from grid flow. */
+static bool grid_skip_child(const LayoutBox *c)
+{
+    if (!c->style) return false;
+    if (c->style->display == DISPLAY_NONE) return true;
+    if (c->style->position == POSITION_ABSOLUTE ||
+        c->style->position == POSITION_FIXED) return true;
+    return false;
+}
+
 /* ── Grid Layout ───────────────────────────────────────────────────── */
 
 void layout_grid(LayoutBox *box, float containing_width, float containing_height,
@@ -254,13 +264,47 @@ void layout_grid(LayoutBox *box, float containing_width, float containing_height
     if (s->row_gap.type != VAL_NONE && s->row_gap.type != VAL_AUTO)
         row_gap = grid_resolve_len(s->row_gap, fs, content_w);
 
+    /* ── Handle absolutely/fixed positioned children ─────────────── */
+
+    for (LayoutBox *c = box->first_child; c; c = c->next_sibling) {
+        if (!c->style) continue;
+        if (c->style->display == DISPLAY_NONE) continue;
+        if (c->style->position == POSITION_ABSOLUTE ||
+            c->style->position == POSITION_FIXED) {
+            if (grid_is_inline(c->type))
+                layout_inline(c, content_w, arena);
+            else
+                layout_block(c, content_w, specified_h >= 0 ? specified_h : containing_height, arena);
+
+            float abs_x = 0, abs_y = 0;
+            float cfs = c->style->font_size;
+            if (c->style->left.type != VAL_AUTO)
+                abs_x = grid_resolve_len(c->style->left, cfs, content_w);
+            else if (c->style->right.type != VAL_AUTO) {
+                float r_val = grid_resolve_len(c->style->right, cfs, content_w);
+                abs_x = content_w - c->rect.width - c->padding.left - c->padding.right
+                      - c->border.left - c->border.right - c->margin.left - c->margin.right - r_val;
+            }
+            float ch = specified_h >= 0 ? specified_h : containing_height;
+            if (c->style->top.type != VAL_AUTO)
+                abs_y = grid_resolve_len(c->style->top, cfs, ch);
+            else if (c->style->bottom.type != VAL_AUTO) {
+                float b_val = grid_resolve_len(c->style->bottom, cfs, ch);
+                abs_y = ch - c->rect.height - c->padding.top - c->padding.bottom
+                      - c->border.top - c->border.bottom - c->margin.top - c->margin.bottom - b_val;
+            }
+            c->rect.x = abs_x + c->margin.left + c->border.left + c->padding.left;
+            c->rect.y = abs_y + c->margin.top + c->border.top + c->padding.top;
+        }
+    }
+
     /* ── Collect grid items ───────────────────────────────────────── */
 
     GridItem items[GRID_MAX_ITEMS];
     int item_count = 0;
 
     for (LayoutBox *c = box->first_child; c; c = c->next_sibling) {
-        if (c->style && c->style->display == DISPLAY_NONE) continue;
+        if (grid_skip_child(c)) continue;
         if (item_count >= GRID_MAX_ITEMS) break;
         items[item_count].box = c;
         items[item_count].col_start = -1;

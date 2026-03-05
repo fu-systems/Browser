@@ -234,8 +234,8 @@ static void render_box(CairoRenderer *r, const LayoutBox *box,
         cairo_fill(cr);
     }
 
-    /* Text content. */
-    if (box->type == BOX_TEXT && box->text && box->text_len > 0 && s) {
+    /* Text content (BOX_TEXT nodes and replaced elements with text like buttons/inputs). */
+    if (box->text && box->text_len > 0 && s) {
         PaneFont *font = select_font(r, s);
         if (font) {
             render_text_ft(r, font, box->text, box->text_len,

@@ -80,6 +80,14 @@ static void apply_replaced_defaults(LayoutBox *box, const DomNode *node,
                 box->style->border_left_color = (CssColor){0xAA,0xAA,0xAA,0xFF};
                 box->style->background_color = (CssColor){0xEE,0xEE,0xEE,0xFF};
             }
+            /* Set initial dimensions so layout_inline's replaced-element
+             * early-return path fires (requires width > 0 && height > 0). */
+            {
+                float text_w = val[0] ? (float)strlen(val) * fs * 0.6f : fs * 3;
+                box->rect.width = text_w + box->padding.left + box->padding.right
+                                 + box->border.left + box->border.right;
+                box->rect.height = fs * 1.4f;
+            }
             return;
         }
         if (strcmp(type, "checkbox") == 0 || strcmp(type, "radio") == 0) {

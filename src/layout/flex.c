@@ -98,6 +98,16 @@ static bool flex_is_inline(LayoutBoxType t)
     return t == BOX_INLINE || t == BOX_TEXT || t == BOX_INLINE_BLOCK;
 }
 
+/* Check if a child should be skipped from flex flow. */
+static bool flex_skip_child(const LayoutBox *c)
+{
+    if (!c->style) return false;
+    if (c->style->display == DISPLAY_NONE) return true;
+    if (c->style->position == POSITION_ABSOLUTE ||
+        c->style->position == POSITION_FIXED) return true;
+    return false;
+}
+
 /* ── Flex Layout ───────────────────────────────────────────────────── */
 
 void layout_flex(LayoutBox *box, float containing_width, float containing_height,
@@ -172,10 +182,42 @@ void layout_flex(LayoutBox *box, float containing_width, float containing_height
     JustifyContent jc = parse_justify(&s->justify_content);
     AlignItems ai = parse_align(&s->align_items);
 
-    /* Count visible children and compute their sizes. */
+    /* Handle absolutely/fixed positioned children: lay them out but remove from flex flow. */
+    for (LayoutBox *c = box->first_child; c; c = c->next_sibling) {
+        if (!c->style) continue;
+        if (c->style->display == DISPLAY_NONE) continue;
+        if (c->style->position == POSITION_ABSOLUTE ||
+            c->style->position == POSITION_FIXED) {
+            if (flex_is_inline(c->type))
+                layout_inline(c, content_w, arena);
+            else
+                layout_block(c, content_w, content_h, arena);
+
+            float abs_x = 0, abs_y = 0;
+            float cfs = c->style->font_size;
+            if (c->style->left.type != VAL_AUTO)
+                abs_x = flex_resolve_len(c->style->left, cfs, content_w);
+            else if (c->style->right.type != VAL_AUTO) {
+                float r_val = flex_resolve_len(c->style->right, cfs, content_w);
+                abs_x = content_w - c->rect.width - c->padding.left - c->padding.right
+                      - c->border.left - c->border.right - c->margin.left - c->margin.right - r_val;
+            }
+            if (c->style->top.type != VAL_AUTO)
+                abs_y = flex_resolve_len(c->style->top, cfs, content_h);
+            else if (c->style->bottom.type != VAL_AUTO) {
+                float b_val = flex_resolve_len(c->style->bottom, cfs, content_h);
+                abs_y = content_h - c->rect.height - c->padding.top - c->padding.bottom
+                      - c->border.top - c->border.bottom - c->margin.top - c->margin.bottom - b_val;
+            }
+            c->rect.x = abs_x + c->margin.left + c->border.left + c->padding.left;
+            c->rect.y = abs_y + c->margin.top + c->border.top + c->padding.top;
+        }
+    }
+
+    /* Count visible children (excluding absolute/fixed positioned). */
     int child_count = 0;
     for (LayoutBox *c = box->first_child; c; c = c->next_sibling) {
-        if (c->style && c->style->display == DISPLAY_NONE) continue;
+        if (flex_skip_child(c)) continue;
         child_count++;
     }
 
@@ -192,7 +234,7 @@ void layout_flex(LayoutBox *box, float containing_width, float containing_height
 
     /* First pass: layout children at natural size. */
     for (LayoutBox *c = box->first_child; c; c = c->next_sibling) {
-        if (c->style && c->style->display == DISPLAY_NONE) continue;
+        if (flex_skip_child(c)) continue;
 
         if (flex_is_inline(c->type)) {
             layout_inline(c, content_w, arena);
@@ -250,7 +292,7 @@ void layout_flex(LayoutBox *box, float containing_width, float containing_height
     if (free_space > 0 && total_grow > 0) {
         /* Grow items. */
         for (LayoutBox *c = box->first_child; c; c = c->next_sibling) {
-            if (c->style && c->style->display == DISPLAY_NONE) continue;
+            if (flex_skip_child(c)) continue;
             float grow = c->style ? c->style->flex_grow : 0;
             if (grow <= 0) continue;
             float extra = free_space * (grow / total_grow);
@@ -259,7 +301,7 @@ void layout_flex(LayoutBox *box, float containing_width, float containing_height
         }
         /* Relayout grown children so their own children reflow. */
         for (LayoutBox *c = box->first_child; c; c = c->next_sibling) {
-            if (c->style && c->style->display == DISPLAY_NONE) continue;
+            if (flex_skip_child(c)) continue;
             float grow = c->style ? c->style->flex_grow : 0;
             if (grow <= 0) continue;
             if (flex_is_inline(c->type)) {
@@ -280,7 +322,7 @@ void layout_flex(LayoutBox *box, float containing_width, float containing_height
         /* Shrink items. */
         float deficit = -free_space;
         for (LayoutBox *c = box->first_child; c; c = c->next_sibling) {
-            if (c->style && c->style->display == DISPLAY_NONE) continue;
+            if (flex_skip_child(c)) continue;
             float shrink = c->style ? c->style->flex_shrink : 1;
             if (shrink <= 0) continue;
             float reduction = deficit * (shrink / total_shrink);
@@ -299,7 +341,7 @@ void layout_flex(LayoutBox *box, float containing_width, float containing_height
     total_main = 0;
     max_cross = 0;
     for (LayoutBox *c = box->first_child; c; c = c->next_sibling) {
-        if (c->style && c->style->display == DISPLAY_NONE) continue;
+        if (flex_skip_child(c)) continue;
         float child_outer_main, child_outer_cross;
         if (is_row) {
             child_outer_main = c->rect.width + c->padding.left + c->padding.right
@@ -359,7 +401,7 @@ void layout_flex(LayoutBox *box, float containing_width, float containing_height
 
     /* Position each child. */
     for (LayoutBox *c = box->first_child; c; c = c->next_sibling) {
-        if (c->style && c->style->display == DISPLAY_NONE) continue;
+        if (flex_skip_child(c)) continue;
 
         float child_outer_main, child_outer_cross;
         if (is_row) {

@@ -115,11 +115,14 @@ void layout_inline(LayoutBox *box, float available_width, Arena *arena)
         for (LayoutBox *child = box->first_child; child; child = child->next_sibling) {
             layout_inline(child, available_width - x, arena);
 
+            float child_outer_w = child->rect.width + child->padding.left + child->padding.right
+                                + child->border.left + child->border.right
+                                + child->margin.left + child->margin.right;
             float child_h = child->rect.height + child->padding.top + child->padding.bottom
                           + child->border.top + child->border.bottom
                           + child->margin.top + child->margin.bottom;
 
-            if (x + child->rect.width > available_width && x > 0) {
+            if (x + child_outer_w > available_width && x > 0) {
                 if (x > max_x) max_x = x;
                 x = 0;
                 y += cur_line_h;
@@ -128,9 +131,6 @@ void layout_inline(LayoutBox *box, float available_width, Arena *arena)
 
             child->rect.x = x + child->margin.left + child->border.left + child->padding.left;
             child->rect.y = y + child->margin.top + child->border.top + child->padding.top;
-            float child_outer_w = child->rect.width + child->padding.left + child->padding.right
-                                + child->border.left + child->border.right
-                                + child->margin.left + child->margin.right;
             x += child_outer_w;
             if (child_h > cur_line_h) cur_line_h = child_h;
         }
