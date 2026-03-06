@@ -144,6 +144,182 @@ static void tab_push_history(BrowserTab *tab, const char *url)
     tab->history_count++;
 }
 
+/* ── URL resolution helper ─────────────────────────────────────────── */
+
+static void resolve_url(const char *base, const char *href, char *out, size_t out_sz)
+{
+    if (!href || !href[0]) { out[0] = '\0'; return; }
+
+    /* Absolute URL */
+    if (strncmp(href, "http://", 7) == 0 || strncmp(href, "https://", 8) == 0) {
+        snprintf(out, out_sz, "%s", href);
+        return;
+    }
+
+    /* Protocol-relative URL */
+    if (href[0] == '/' && href[1] == '/') {
+        /* Use same scheme as base. */
+        if (strncmp(base, "https://", 8) == 0)
+            snprintf(out, out_sz, "https:%s", href);
+        else
+            snprintf(out, out_sz, "http:%s", href);
+        return;
+    }
+
+    /* Extract scheme + host from base. */
+    const char *scheme_end = strstr(base, "://");
+    if (!scheme_end) { out[0] = '\0'; return; }
+    const char *host_start = scheme_end + 3;
+    const char *path_start = strchr(host_start, '/');
+
+    if (href[0] == '/') {
+        /* Root-relative */
+        size_t prefix_len = path_start ? (size_t)(path_start - base) : strlen(base);
+        snprintf(out, out_sz, "%.*s%s", (int)prefix_len, base, href);
+    } else {
+        /* Relative to current path */
+        if (path_start) {
+            const char *last_slash = strrchr(path_start, '/');
+            if (last_slash) {
+                size_t prefix_len = (size_t)(last_slash - base) + 1;
+                snprintf(out, out_sz, "%.*s%s", (int)prefix_len, base, href);
+            } else {
+                size_t prefix_len = strlen(base);
+                snprintf(out, out_sz, "%.*s/%s", (int)prefix_len, base, href);
+            }
+        } else {
+            snprintf(out, out_sz, "%s/%s", base, href);
+        }
+    }
+}
+
+/* ── Extract and fetch external CSS from <link> tags ──────────────── */
+
+static char *fetch_external_css(const char *html, size_t html_len,
+                                const char *base_url, size_t *out_len)
+{
+    /* Quick scan for <link ... rel="stylesheet" ... href="..."> in HTML.
+     * This is a rough heuristic parser — good enough for real sites. */
+    size_t css_cap = 4096;
+    size_t css_len = 0;
+    char *css_buf = malloc(css_cap);
+    if (!css_buf) { *out_len = 0; return NULL; }
+    css_buf[0] = '\0';
+
+    const char *p = html;
+    const char *end = html + html_len;
+
+    while (p < end) {
+        /* Find <link */
+        const char *link = p;
+        while (link < end - 5) {
+            if (link[0] == '<' &&
+                (link[1] == 'l' || link[1] == 'L') &&
+                (link[2] == 'i' || link[2] == 'I') &&
+                (link[3] == 'n' || link[3] == 'N') &&
+                (link[4] == 'k' || link[4] == 'K') &&
+                (link[5] == ' ' || link[5] == '\t' || link[5] == '\n' || link[5] == '\r')) {
+                break;
+            }
+            link++;
+        }
+        if (link >= end - 5) break;
+        p = link + 1;
+
+        /* Find end of tag. */
+        const char *tag_end = memchr(link, '>', end - link);
+        if (!tag_end) break;
+
+        /* Check if rel="stylesheet" is present. */
+        size_t tag_len = (size_t)(tag_end - link);
+        bool has_stylesheet = false;
+        const char *rel = link;
+        while (rel < tag_end - 3) {
+            if ((rel[0] == 'r' || rel[0] == 'R') &&
+                (rel[1] == 'e' || rel[1] == 'E') &&
+                (rel[2] == 'l' || rel[2] == 'L') &&
+                (rel[3] == '=' || rel[3] == ' ' || rel[3] == '\t')) {
+                /* Find value. */
+                const char *v = rel + 3;
+                while (v < tag_end && (*v == ' ' || *v == '=' || *v == '\t')) v++;
+                if (v < tag_end && (*v == '"' || *v == '\'')) {
+                    char q = *v++;
+                    const char *ve = memchr(v, q, tag_end - v);
+                    if (ve) {
+                        size_t vlen = ve - v;
+                        if (vlen == 10 && strncasecmp(v, "stylesheet", 10) == 0)
+                            has_stylesheet = true;
+                    }
+                }
+                break;
+            }
+            rel++;
+        }
+
+        if (!has_stylesheet) { p = tag_end + 1; continue; }
+
+        /* Extract href. */
+        const char *href_start = NULL;
+        size_t href_len = 0;
+        const char *h = link;
+        while (h < tag_end - 4) {
+            if ((h[0] == 'h' || h[0] == 'H') &&
+                (h[1] == 'r' || h[1] == 'R') &&
+                (h[2] == 'e' || h[2] == 'E') &&
+                (h[3] == 'f' || h[3] == 'F') &&
+                (h[4] == '=' || h[4] == ' ' || h[4] == '\t')) {
+                const char *v = h + 4;
+                while (v < tag_end && (*v == ' ' || *v == '=' || *v == '\t')) v++;
+                if (v < tag_end && (*v == '"' || *v == '\'')) {
+                    char q = *v++;
+                    const char *ve = memchr(v, q, tag_end - v);
+                    if (ve) {
+                        href_start = v;
+                        href_len = ve - v;
+                    }
+                }
+                break;
+            }
+            h++;
+        }
+
+        if (!href_start || href_len == 0) { p = tag_end + 1; continue; }
+
+        /* Resolve URL. */
+        char href_buf[512];
+        if (href_len >= sizeof(href_buf)) { p = tag_end + 1; continue; }
+        memcpy(href_buf, href_start, href_len);
+        href_buf[href_len] = '\0';
+
+        char resolved[2048];
+        resolve_url(base_url, href_buf, resolved, sizeof(resolved));
+        if (!resolved[0]) { p = tag_end + 1; continue; }
+
+        /* Fetch CSS. */
+        HttpResponse *css_resp = http_get(resolved, 3);
+        if (css_resp && !css_resp->error && css_resp->body && css_resp->body_len > 0) {
+            size_t needed = css_len + css_resp->body_len + 2;
+            while (needed > css_cap) {
+                css_cap *= 2;
+                char *new_buf = realloc(css_buf, css_cap);
+                if (!new_buf) { http_response_free(css_resp); break; }
+                css_buf = new_buf;
+            }
+            css_buf[css_len++] = '\n';
+            memcpy(css_buf + css_len, css_resp->body, css_resp->body_len);
+            css_len += css_resp->body_len;
+            css_buf[css_len] = '\0';
+        }
+        if (css_resp) http_response_free(css_resp);
+
+        p = tag_end + 1;
+    }
+
+    *out_len = css_len;
+    if (css_len == 0) { free(css_buf); return NULL; }
+    return css_buf;
+}
+
 /* ── Rendering ─────────────────────────────────────────────────────── */
 
 static void render_page(BrowserWindow *bw, const char *html, size_t len,
@@ -154,8 +330,16 @@ static void render_page(BrowserWindow *bw, const char *html, size_t len,
 
     tab_free_content(tab);
 
-    tab->result = pane_render(html, len, NULL, 0,
+    /* Fetch external CSS from <link> tags. */
+    size_t ext_css_len = 0;
+    char *ext_css = NULL;
+    if (tab->url[0] && strncmp(tab->url, "http", 4) == 0) {
+        ext_css = fetch_external_css(html, len, tab->url, &ext_css_len);
+    }
+
+    tab->result = pane_render(html, len, ext_css, ext_css_len,
                               bw->viewport_width, bw->viewport_height);
+    free(ext_css);
     tab->has_content = true;
 
     /* Run plugin DOM-ready hook (lets plugins mutate the DOM). */

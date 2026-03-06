@@ -58,6 +58,15 @@ typedef enum {
     FLOAT_RIGHT,
 } Float;
 
+/* ── Clear Values ─────────────────────────────────────────────────── */
+
+typedef enum {
+    CLEAR_NONE,
+    CLEAR_LEFT,
+    CLEAR_RIGHT,
+    CLEAR_BOTH,
+} Clear;
+
 /* ── Writing Mode ──────────────────────────────────────────────────── */
 
 typedef enum {
@@ -174,6 +183,7 @@ struct ComputedStyle {
     Display      display;
     Position     position;
     Float        float_val;
+    Clear        clear_val;
 
     /* Box model */
     CssValue     width, height;

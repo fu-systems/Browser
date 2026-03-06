@@ -201,6 +201,8 @@ static void layout_children(LayoutBox *box, Arena *arena)
     float prev_margin_bottom = 0;
     float content_width = box->rect.width;
     float float_max_bottom = 0;  /* Track the bottom of floated elements. */
+    float float_left_bottom = 0;   /* Bottom of left floats. */
+    float float_right_bottom = 0;  /* Bottom of right floats. */
 
     for (LayoutBox *child = box->first_child; child; child = child->next_sibling) {
         if (child->style && child->style->display == DISPLAY_NONE)
@@ -252,14 +254,30 @@ static void layout_children(LayoutBox *box, Arena *arena)
             }
             child->rect.y = cursor_y + child->margin.top + child->border.top + child->padding.top;
 
-            /* Track float extent for auto height calculation. */
+            /* Track float extent for auto height calculation and clear. */
             float float_bottom = child->rect.y + child->rect.height +
                                  child->padding.bottom + child->border.bottom +
                                  child->margin.bottom;
             if (float_bottom > float_max_bottom)
                 float_max_bottom = float_bottom;
+            if (child->style->float_val == FLOAT_LEFT && float_bottom > float_left_bottom)
+                float_left_bottom = float_bottom;
+            if (child->style->float_val == FLOAT_RIGHT && float_bottom > float_right_bottom)
+                float_right_bottom = float_bottom;
             apply_relative_offset(child, content_width, box->rect.height);
             continue;
+        }
+
+        /* Handle CSS clear property. */
+        if (child->style && child->style->clear_val != CLEAR_NONE) {
+            float clear_to = 0;
+            if (child->style->clear_val == CLEAR_LEFT || child->style->clear_val == CLEAR_BOTH) {
+                if (float_left_bottom > clear_to) clear_to = float_left_bottom;
+            }
+            if (child->style->clear_val == CLEAR_RIGHT || child->style->clear_val == CLEAR_BOTH) {
+                if (float_right_bottom > clear_to) clear_to = float_right_bottom;
+            }
+            if (clear_to > cursor_y) cursor_y = clear_to;
         }
 
         if (is_inline_type(child->type)) {
@@ -270,6 +288,8 @@ static void layout_children(LayoutBox *box, Arena *arena)
             float font_size = box->style ? box->style->font_size : 16.0f;
             float default_line_h = font_size * (box->style ? box->style->line_height : 1.2f);
             TextAlign align = box->style ? box->style->text_align : TEXT_ALIGN_START;
+            bool no_wrap = box->style && (box->style->white_space == WS_NOWRAP ||
+                                           box->style->white_space == WS_PRE);
 
             /* Track line starts for text-align adjustment. */
             LayoutBox *line_start = NULL;
@@ -316,8 +336,8 @@ static void layout_children(LayoutBox *box, Arena *arena)
                     + child->padding.bottom + child->border.top + child->border.bottom
                     + child->margin.top + child->margin.bottom;
 
-                /* Wrap to next line if needed. */
-                if (x + child_outer_w > content_width && x > 0) {
+                /* Wrap to next line if needed (unless nowrap). */
+                if (!no_wrap && x + child_outer_w > content_width && x > 0) {
                     /* Apply text-align to completed line. */
                     if (align == TEXT_ALIGN_CENTER || align == TEXT_ALIGN_RIGHT ||
                         align == TEXT_ALIGN_END) {

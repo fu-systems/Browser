@@ -5,6 +5,7 @@
 #include "selectors.h"
 #include "css_tokenizer.h"
 #include <string.h>
+#include <stdlib.h>
 #include <ctype.h>
 
 /* ── Specificity ────────────────────────────────────────────────────── */
@@ -95,17 +96,98 @@ static bool match_compound(const CompoundSelector *cs, const DomNode *elem)
             break;
         }
         case SEL_PSEUDO_CLASS:
-            /* Simplified: support first-child, last-child, root. */
             if (strcmp(p->name, "first-child") == 0) {
-                if (!elem->parent || elem->parent->first_child != elem)
-                    return false;
+                if (!elem->parent) return false;
+                /* Find first element child. */
+                const DomNode *fc = elem->parent->first_child;
+                while (fc && fc->type != PANE_NODE_ELEMENT) fc = fc->next_sibling;
+                if (fc != elem) return false;
             } else if (strcmp(p->name, "last-child") == 0) {
-                if (!elem->parent || elem->parent->last_child != elem)
-                    return false;
+                if (!elem->parent) return false;
+                const DomNode *lc = elem->parent->last_child;
+                while (lc && lc->type != PANE_NODE_ELEMENT) lc = lc->prev_sibling;
+                if (lc != elem) return false;
             } else if (strcmp(p->name, "root") == 0) {
                 if (elem->elem.tag != TAG_HTML) return false;
+            } else if (strcmp(p->name, "first-of-type") == 0) {
+                if (!elem->parent) return false;
+                HtmlTag tag = elem->elem.tag;
+                for (const DomNode *s = elem->parent->first_child; s; s = s->next_sibling) {
+                    if (s->type == PANE_NODE_ELEMENT && s->elem.tag == tag) {
+                        if (s != elem) return false;
+                        break;
+                    }
+                }
+            } else if (strcmp(p->name, "last-of-type") == 0) {
+                if (!elem->parent) return false;
+                HtmlTag tag = elem->elem.tag;
+                for (const DomNode *s = elem->parent->last_child; s; s = s->prev_sibling) {
+                    if (s->type == PANE_NODE_ELEMENT && s->elem.tag == tag) {
+                        if (s != elem) return false;
+                        break;
+                    }
+                }
+            } else if (strcmp(p->name, "only-child") == 0) {
+                if (!elem->parent) return false;
+                int count = 0;
+                for (const DomNode *s = elem->parent->first_child; s; s = s->next_sibling) {
+                    if (s->type == PANE_NODE_ELEMENT) count++;
+                    if (count > 1) break;
+                }
+                if (count != 1) return false;
+            } else if (strcmp(p->name, "empty") == 0) {
+                if (elem->first_child) return false;
+            } else if (strcmp(p->name, "link") == 0) {
+                if (elem->elem.tag != TAG_A) return false;
+            } else if (strcmp(p->name, "any-link") == 0) {
+                if (elem->elem.tag != TAG_A && elem->elem.tag != TAG_AREA)
+                    return false;
+            } else if (strcmp(p->name, "enabled") == 0) {
+                if (elem->elem.tag != TAG_INPUT && elem->elem.tag != TAG_BUTTON &&
+                    elem->elem.tag != TAG_SELECT && elem->elem.tag != TAG_TEXTAREA)
+                    return false;
+                /* Check for disabled attribute. */
+                const char *disabled = elem_get_attr(elem, "disabled");
+                if (disabled) return false;
+            } else if (strcmp(p->name, "disabled") == 0) {
+                const char *disabled = elem_get_attr(elem, "disabled");
+                if (!disabled) return false;
+            } else if (strcmp(p->name, "checked") == 0) {
+                const char *checked = elem_get_attr(elem, "checked");
+                if (!checked) return false;
+            } else if (strcmp(p->name, "hover") == 0 ||
+                       strcmp(p->name, "focus") == 0 ||
+                       strcmp(p->name, "active") == 0 ||
+                       strcmp(p->name, "visited") == 0 ||
+                       strcmp(p->name, "focus-within") == 0 ||
+                       strcmp(p->name, "focus-visible") == 0) {
+                /* Interactive states: no hover/focus support yet.
+                 * Return false so these selectors don't match (they add hover effects). */
+                return false;
+            } else if (strncmp(p->name, "nth-child(", 10) == 0) {
+                /* Simplified: support nth-child(odd), nth-child(even), nth-child(N). */
+                if (!elem->parent) return false;
+                int n = 0;
+                for (const DomNode *s = elem->parent->first_child; s; s = s->next_sibling) {
+                    if (s->type == PANE_NODE_ELEMENT) n++;
+                    if (s == elem) break;
+                }
+                const char *arg = p->name + 10;
+                if (strncmp(arg, "odd", 3) == 0) {
+                    if (n % 2 == 0) return false;
+                } else if (strncmp(arg, "even", 4) == 0) {
+                    if (n % 2 != 0) return false;
+                } else {
+                    int target = atoi(arg);
+                    if (target > 0 && n != target) return false;
+                }
+            } else if (strcmp(p->name, "not") == 0) {
+                /* :not() with simple argument stored in p->value. */
+                /* For now, just accept — :not() matching is complex. */
             } else {
-                return false; /* Unknown pseudo-class. */
+                /* Unknown pseudo-class: don't reject the entire selector.
+                 * Many pseudo-classes are harmless (e.g., ::-webkit-*). */
+                return false;
             }
             break;
         case SEL_PSEUDO_ELEM:
@@ -345,14 +427,23 @@ bool selector_parse(const char *input, size_t len, Arena *arena,
                         .name = arena_strndup(arena, next.start, next.len),
                     };
                 }
-                /* Skip function arguments. */
+                /* For function pseudo-classes, include arguments in the name. */
                 if (next.type == CSSTOK_FUNCTION) {
+                    /* Collect "name(args)" into the name field. */
+                    const char *func_start = next.start;
                     int depth = 1;
+                    const char *arg_end = func_start + next.len;
                     while (depth > 0 && css_tokenizer_next(&t, &next)) {
                         if (next.type == CSSTOK_LPAREN || next.type == CSSTOK_FUNCTION)
                             depth++;
-                        if (next.type == CSSTOK_RPAREN) depth--;
+                        if (next.type == CSSTOK_RPAREN) { depth--; arg_end = next.start + next.len; }
                         if (next.type == CSSTOK_EOF) break;
+                    }
+                    /* Overwrite name with full "name(args)" string. */
+                    size_t full_len = (size_t)(arg_end - func_start);
+                    if (full_len > 0 && cur_cs->part_count > 0) {
+                        cur_cs->parts[cur_cs->part_count - 1].name =
+                            arena_strndup(arena, func_start, full_len);
                     }
                 }
             }

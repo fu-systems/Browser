@@ -449,6 +449,16 @@ void computed_style_resolve(ComputedStyle *style,
         case CSS_PROP_FLOAT:
             style->float_val = parse_float(val);
             break;
+        case CSS_PROP_CLEAR:
+            if (val->type == VAL_KEYWORD && val->string) {
+                if (strcmp(val->string, "left") == 0) style->clear_val = CLEAR_LEFT;
+                else if (strcmp(val->string, "right") == 0) style->clear_val = CLEAR_RIGHT;
+                else if (strcmp(val->string, "both") == 0) style->clear_val = CLEAR_BOTH;
+                else style->clear_val = CLEAR_NONE;
+            } else if (val->type == VAL_NONE) {
+                style->clear_val = CLEAR_NONE;
+            }
+            break;
         case CSS_PROP_WIDTH:
             style->width = *val;
             break;

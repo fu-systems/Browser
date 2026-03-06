@@ -556,6 +556,242 @@ static bool try_expand_shorthand(CssPropId prop_id, const char *value_start,
         }
         return true;
     }
+    case CSS_PROP_FONT: {
+        /* font: [style] [weight] size[/line-height] family
+         * Simplified parser: scan tokens, detect style/weight keywords,
+         * then size (number/dimension/percentage), optional /line-height, rest is family. */
+        CssTokenizer ft;
+        css_tokenizer_init(&ft, value_start, value_len);
+        CssToken ftok;
+        bool has_style = false, has_weight = false, has_size = false;
+
+        /* Check for system font keywords first. */
+        css_tokenizer_next(&ft, &ftok);
+        while (ftok.type == CSSTOK_WHITESPACE) css_tokenizer_next(&ft, &ftok);
+        if (ftok.type == CSSTOK_IDENT &&
+            (str_eq_ci(ftok.start, ftok.len, "caption") ||
+             str_eq_ci(ftok.start, ftok.len, "icon") ||
+             str_eq_ci(ftok.start, ftok.len, "menu") ||
+             str_eq_ci(ftok.start, ftok.len, "message-box") ||
+             str_eq_ci(ftok.start, ftok.len, "small-caption") ||
+             str_eq_ci(ftok.start, ftok.len, "status-bar"))) {
+            return true; /* System font keywords — skip. */
+        }
+
+        /* Re-init and parse properly. */
+        css_tokenizer_init(&ft, value_start, value_len);
+
+        while (css_tokenizer_next(&ft, &ftok)) {
+            if (ftok.type == CSSTOK_EOF) break;
+            if (ftok.type == CSSTOK_WHITESPACE) continue;
+            if (ftok.type == CSSTOK_DELIM && ftok.delim == '!') break;
+
+            if (ftok.type == CSSTOK_IDENT && !has_size) {
+                /* font-style keywords */
+                if (str_eq_ci(ftok.start, ftok.len, "italic") ||
+                    str_eq_ci(ftok.start, ftok.len, "oblique")) {
+                    if (!has_style) {
+                        declblock_push(db, (CssDeclaration){ CSS_PROP_FONT_STYLE,
+                            css_parse_value(ftok.start, ftok.len, arena), important }, arena);
+                        has_style = true;
+                    }
+                    continue;
+                }
+                if (str_eq_ci(ftok.start, ftok.len, "normal")) {
+                    continue; /* normal is default for both style and weight */
+                }
+                /* font-weight keywords */
+                if (str_eq_ci(ftok.start, ftok.len, "bold") ||
+                    str_eq_ci(ftok.start, ftok.len, "bolder") ||
+                    str_eq_ci(ftok.start, ftok.len, "lighter")) {
+                    if (!has_weight) {
+                        declblock_push(db, (CssDeclaration){ CSS_PROP_FONT_WEIGHT,
+                            css_parse_value(ftok.start, ftok.len, arena), important }, arena);
+                        has_weight = true;
+                    }
+                    continue;
+                }
+                /* Must be font-family if we haven't hit size yet and it's not a keyword we know */
+                /* But it could be a size keyword like small, medium, large... */
+                if (str_eq_ci(ftok.start, ftok.len, "xx-small") ||
+                    str_eq_ci(ftok.start, ftok.len, "x-small") ||
+                    str_eq_ci(ftok.start, ftok.len, "small") ||
+                    str_eq_ci(ftok.start, ftok.len, "medium") ||
+                    str_eq_ci(ftok.start, ftok.len, "large") ||
+                    str_eq_ci(ftok.start, ftok.len, "x-large") ||
+                    str_eq_ci(ftok.start, ftok.len, "xx-large") ||
+                    str_eq_ci(ftok.start, ftok.len, "xxx-large") ||
+                    str_eq_ci(ftok.start, ftok.len, "smaller") ||
+                    str_eq_ci(ftok.start, ftok.len, "larger")) {
+                    declblock_push(db, (CssDeclaration){ CSS_PROP_FONT_SIZE,
+                        css_parse_value(ftok.start, ftok.len, arena), important }, arena);
+                    has_size = true;
+                    continue;
+                }
+                /* Fall through: it's the font-family */
+            }
+
+            if ((ftok.type == CSSTOK_NUMBER || ftok.type == CSSTOK_DIMENSION ||
+                 ftok.type == CSSTOK_PERCENTAGE) && !has_size) {
+                /* Could be weight (number) or size */
+                if (ftok.type == CSSTOK_NUMBER && !has_weight &&
+                    (ftok.num_value == 100 || ftok.num_value == 200 ||
+                     ftok.num_value == 300 || ftok.num_value == 400 ||
+                     ftok.num_value == 500 || ftok.num_value == 600 ||
+                     ftok.num_value == 700 || ftok.num_value == 800 ||
+                     ftok.num_value == 900)) {
+                    declblock_push(db, (CssDeclaration){ CSS_PROP_FONT_WEIGHT,
+                        (CssValue){ .type = VAL_NUMBER, .number = ftok.num_value },
+                        important }, arena);
+                    has_weight = true;
+                    continue;
+                }
+                /* It's the font size */
+                declblock_push(db, (CssDeclaration){ CSS_PROP_FONT_SIZE,
+                    css_parse_value(ftok.start, ftok.len, arena), important }, arena);
+                has_size = true;
+
+                /* Check for /line-height */
+                CssToken slash;
+                size_t saved_pos = ft.pos;
+                css_tokenizer_next(&ft, &slash);
+                while (slash.type == CSSTOK_WHITESPACE) css_tokenizer_next(&ft, &slash);
+                if (slash.type == CSSTOK_DELIM && slash.delim == '/') {
+                    CssToken lh;
+                    css_tokenizer_next(&ft, &lh);
+                    while (lh.type == CSSTOK_WHITESPACE) css_tokenizer_next(&ft, &lh);
+                    if (lh.type == CSSTOK_NUMBER || lh.type == CSSTOK_DIMENSION ||
+                        lh.type == CSSTOK_PERCENTAGE) {
+                        declblock_push(db, (CssDeclaration){ CSS_PROP_LINE_HEIGHT,
+                            css_parse_value(lh.start, lh.len, arena), important }, arena);
+                    }
+                } else {
+                    ft.pos = saved_pos; /* put back */
+                }
+                continue;
+            }
+
+            /* Everything after size is font-family. Collect rest as string. */
+            if (has_size) {
+                const char *fam_start = ftok.start;
+                const char *fam_end = value_start + value_len;
+                /* Trim trailing whitespace and !important. */
+                while (fam_end > fam_start && (fam_end[-1] == ' ' || fam_end[-1] == '\t'))
+                    fam_end--;
+                size_t fam_len = fam_end - fam_start;
+                if (fam_len > 0) {
+                    /* Strip quotes if present. */
+                    if (fam_len >= 2 && (fam_start[0] == '"' || fam_start[0] == '\'')) {
+                        fam_start++;
+                        fam_len -= 2;
+                    }
+                    declblock_push(db, (CssDeclaration){ CSS_PROP_FONT_FAMILY,
+                        (CssValue){ .type = VAL_STRING,
+                                    .string = arena_strndup(arena, fam_start, fam_len) },
+                        important }, arena);
+                }
+                break; /* Done parsing. */
+            }
+        }
+        return true;
+    }
+    case CSS_PROP_BACKGROUND: {
+        /* background: [color] [image] [repeat] [position] [/size] [attachment]
+         * Simplified: extract color and image. */
+        CssTokenizer bt;
+        css_tokenizer_init(&bt, value_start, value_len);
+        CssToken btok;
+        bool has_color = false, has_image = false;
+
+        while (css_tokenizer_next(&bt, &btok)) {
+            if (btok.type == CSSTOK_EOF) break;
+            if (btok.type == CSSTOK_WHITESPACE) continue;
+            if (btok.type == CSSTOK_DELIM && btok.delim == '!') break;
+
+            /* Hash color */
+            if (btok.type == CSSTOK_HASH && !has_color) {
+                CssColor color;
+                if (css_color_from_hex(btok.start, btok.len, &color)) {
+                    declblock_push(db, (CssDeclaration){ CSS_PROP_BACKGROUND_COLOR,
+                        (CssValue){ .type = VAL_COLOR, .color = color }, important }, arena);
+                    has_color = true;
+                }
+                continue;
+            }
+
+            /* rgb()/rgba() color function */
+            if (btok.type == CSSTOK_FUNCTION &&
+                (str_eq_ci(btok.start, btok.len, "rgb") ||
+                 str_eq_ci(btok.start, btok.len, "rgba"))) {
+                float vals[4] = {0, 0, 0, 255};
+                int vi = 0;
+                CssToken arg;
+                while (css_tokenizer_next(&bt, &arg)) {
+                    if (arg.type == CSSTOK_RPAREN || arg.type == CSSTOK_EOF) break;
+                    if ((arg.type == CSSTOK_NUMBER || arg.type == CSSTOK_PERCENTAGE)
+                        && vi < 4)
+                        vals[vi++] = arg.num_value;
+                }
+                if (!has_color) {
+                    declblock_push(db, (CssDeclaration){ CSS_PROP_BACKGROUND_COLOR,
+                        (CssValue){ .type = VAL_COLOR,
+                            .color = { (uint8_t)vals[0], (uint8_t)vals[1],
+                                       (uint8_t)vals[2],
+                                       vi >= 4 ? (uint8_t)(vals[3] * 255) : 255 } },
+                        important }, arena);
+                    has_color = true;
+                }
+                continue;
+            }
+
+            /* url() image */
+            if (btok.type == CSSTOK_FUNCTION &&
+                str_eq_ci(btok.start, btok.len, "url")) {
+                CssToken content;
+                while (css_tokenizer_next(&bt, &content)) {
+                    if (content.type == CSSTOK_RPAREN || content.type == CSSTOK_EOF) break;
+                }
+                has_image = true;
+                continue;
+            }
+
+            /* Gradient functions — skip content */
+            if (btok.type == CSSTOK_FUNCTION) {
+                int depth = 1;
+                CssToken ft2;
+                while (depth > 0 && css_tokenizer_next(&bt, &ft2)) {
+                    if (ft2.type == CSSTOK_FUNCTION || ft2.type == CSSTOK_LPAREN) depth++;
+                    if (ft2.type == CSSTOK_RPAREN) depth--;
+                    if (ft2.type == CSSTOK_EOF) break;
+                }
+                continue;
+            }
+
+            /* Named color or 'none'/'transparent' */
+            if (btok.type == CSSTOK_IDENT && !has_color) {
+                if (str_eq_ci(btok.start, btok.len, "transparent")) {
+                    declblock_push(db, (CssDeclaration){ CSS_PROP_BACKGROUND_COLOR,
+                        (CssValue){ .type = VAL_COLOR, .color = {0,0,0,0} },
+                        important }, arena);
+                    has_color = true;
+                    continue;
+                }
+                if (str_eq_ci(btok.start, btok.len, "none")) {
+                    continue; /* background: none = no image */
+                }
+                /* Try as named color */
+                CssColor color;
+                if (css_color_from_name(btok.start, btok.len, &color)) {
+                    declblock_push(db, (CssDeclaration){ CSS_PROP_BACKGROUND_COLOR,
+                        (CssValue){ .type = VAL_COLOR, .color = color },
+                        important }, arena);
+                    has_color = true;
+                    continue;
+                }
+            }
+        }
+        return true;
+    }
     default:
         return false;
     }
@@ -695,16 +931,82 @@ Stylesheet *css_parse_stylesheet(const char *input, size_t len)
         if (tok.type == CSSTOK_WHITESPACE || tok.type == CSSTOK_CDO ||
             tok.type == CSSTOK_CDC) continue;
 
-        /* At-rules: skip for now. */
+        /* At-rules. */
         if (tok.type == CSSTOK_AT_KEYWORD) {
-            int depth = 0;
-            while (css_tokenizer_next(&t, &tok)) {
-                if (tok.type == CSSTOK_LBRACE) depth++;
-                if (tok.type == CSSTOK_RBRACE) {
-                    if (--depth <= 0) break;
+            /* Check if it's @media. */
+            bool is_media = str_eq_ci(tok.start, tok.len, "media");
+            if (is_media) {
+                /* Collect media query condition up to '{'. */
+                /* Simplified: accept "all", "screen", or empty (default=all).
+                 * Also accept unknown queries and include them (best-effort). */
+                bool include = true;
+                while (css_tokenizer_next(&t, &tok)) {
+                    if (tok.type == CSSTOK_LBRACE || tok.type == CSSTOK_EOF) break;
+                    /* Check for "print" — we're a screen browser, skip print-only. */
+                    if (tok.type == CSSTOK_IDENT &&
+                        str_eq_ci(tok.start, tok.len, "print")) {
+                        include = false;
+                    }
                 }
-                if (tok.type == CSSTOK_SEMICOLON && depth == 0) break;
-                if (tok.type == CSSTOK_EOF) break;
+                if (tok.type == CSSTOK_LBRACE) {
+                    if (include) {
+                        /* Parse inner rules recursively — they go into the same stylesheet. */
+                        while (true) {
+                            if (!css_tokenizer_next(&t, &tok)) break;
+                            if (tok.type == CSSTOK_EOF || tok.type == CSSTOK_RBRACE) break;
+                            if (tok.type == CSSTOK_WHITESPACE || tok.type == CSSTOK_CDO ||
+                                tok.type == CSSTOK_CDC) continue;
+
+                            /* Nested at-rule inside @media — skip. */
+                            if (tok.type == CSSTOK_AT_KEYWORD) {
+                                int d = 0;
+                                while (css_tokenizer_next(&t, &tok)) {
+                                    if (tok.type == CSSTOK_LBRACE) d++;
+                                    if (tok.type == CSSTOK_RBRACE) { if (--d <= 0) break; }
+                                    if (tok.type == CSSTOK_SEMICOLON && d == 0) break;
+                                    if (tok.type == CSSTOK_EOF) break;
+                                }
+                                continue;
+                            }
+
+                            /* Style rule inside @media. */
+                            const char *sel_s = tok.start;
+                            size_t sel_ep = t.pos;
+                            while (tok.type != CSSTOK_LBRACE && tok.type != CSSTOK_EOF) {
+                                sel_ep = t.pos;
+                                if (!css_tokenizer_next(&t, &tok)) break;
+                            }
+                            if (tok.type != CSSTOK_LBRACE) break;
+                            size_t sel_l = sel_ep - (sel_s - t.input);
+
+                            CssRule rule;
+                            memset(&rule, 0, sizeof(rule));
+                            selector_parse(sel_s, sel_l, &ss->arena, &rule.selectors);
+                            parse_declarations(&t, &rule.declarations, &ss->arena);
+                            if (rule.selectors.count > 0 && rule.declarations.count > 0)
+                                rule_push(ss, rule);
+                        }
+                    } else {
+                        /* Skip entire @media block. */
+                        int d = 1;
+                        while (d > 0 && css_tokenizer_next(&t, &tok)) {
+                            if (tok.type == CSSTOK_LBRACE) d++;
+                            if (tok.type == CSSTOK_RBRACE) d--;
+                            if (tok.type == CSSTOK_EOF) break;
+                        }
+                    }
+                }
+            } else {
+                /* Non-media at-rule: skip. */
+                int depth = 0;
+                while (css_tokenizer_next(&t, &tok)) {
+                    if (tok.type == CSSTOK_LBRACE) depth++;
+                    if (tok.type == CSSTOK_RBRACE) {
+                        if (--depth <= 0) break;
+                    }
+                    if (tok.type == CSSTOK_SEMICOLON && depth == 0) break;
+                    if (tok.type == CSSTOK_EOF) break;
+                }
             }
             continue;
         }

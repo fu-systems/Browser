@@ -6,6 +6,7 @@
  */
 
 #include "inline.h"
+#include "../style/computed.h"
 #include <string.h>
 #include <ctype.h>
 
@@ -65,45 +66,67 @@ void layout_inline(LayoutBox *box, float available_width, Arena *arena)
         /* Simple text layout: wrap words within available_width. */
         const char *text = box->text;
         size_t len = box->text_len;
+        WhiteSpace ws = box->style->white_space;
+        bool no_wrap = (ws == WS_NOWRAP || ws == WS_PRE);
+        bool preserve_spaces = (ws == WS_PRE || ws == WS_PRE_WRAP || ws == WS_BREAK_SPACES);
 
         float x = 0;
         float y = 0;
         float max_x = 0;
         size_t pos = 0;
 
-        while (pos < len) {
-            /* Skip leading whitespace on a new line. */
-            if (x == 0) {
-                while (pos < len && text[pos] == ' ') pos++;
+        if (preserve_spaces) {
+            /* Pre: preserve all whitespace and newlines. */
+            while (pos < len) {
+                if (text[pos] == '\n') {
+                    if (x > max_x) max_x = x;
+                    x = 0;
+                    y += line_h;
+                    pos++;
+                    continue;
+                }
+                /* Measure until next newline or end. */
+                size_t line_end = pos;
+                while (line_end < len && text[line_end] != '\n') line_end++;
+                float run_w = measure_text(text + pos, line_end - pos, font_size);
+                x += run_w;
+                pos = line_end;
             }
+        } else {
+            while (pos < len) {
+                /* Skip leading whitespace on a new line. */
+                if (x == 0) {
+                    while (pos < len && text[pos] == ' ') pos++;
+                }
 
-            size_t word_end = next_word_break(text, len, pos);
-            size_t word_start = pos;
-            /* Skip whitespace before word. */
-            while (word_start < word_end && isspace((unsigned char)text[word_start]))
-                word_start++;
+                size_t word_end = next_word_break(text, len, pos);
+                size_t word_start = pos;
+                /* Skip whitespace before word. */
+                while (word_start < word_end && isspace((unsigned char)text[word_start]))
+                    word_start++;
 
-            float word_w = measure_text(text + word_start, word_end - word_start, font_size);
+                float word_w = measure_text(text + word_start, word_end - word_start, font_size);
 
-            /* Wrap if needed. */
-            if (x + word_w > available_width && x > 0) {
-                if (x > max_x) max_x = x;
-                x = 0;
-                y += line_h;
+                /* Wrap if needed (unless nowrap). */
+                if (!no_wrap && x + word_w > available_width && x > 0) {
+                    if (x > max_x) max_x = x;
+                    x = 0;
+                    y += line_h;
+                }
+
+                x += word_w;
+                if (word_end < len && isspace((unsigned char)text[word_end - 1])) {
+                    x += char_width(font_size); /* space after word */
+                }
+
+                pos = word_end;
             }
-
-            x += word_w;
-            if (word_end < len && isspace((unsigned char)text[word_end - 1])) {
-                x += char_width(font_size); /* space after word */
-            }
-
-            pos = word_end;
         }
 
         if (x > max_x) max_x = x;
         if (x > 0) y += line_h; /* last line */
 
-        box->rect.width = max_x > 0 ? max_x : available_width;
+        box->rect.width = max_x > 0 ? max_x : (no_wrap ? 0 : available_width);
         box->rect.height = y;
     } else if (box->type == BOX_INLINE || box->type == BOX_INLINE_BLOCK) {
         /* Inline box: lay out inline children. */
