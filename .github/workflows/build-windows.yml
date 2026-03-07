@@ -55,6 +55,9 @@ jobs:
       - name: Build
         run: cmake --build build-win --config Release --parallel
 
+      - name: Run CLI smoke test
+        run: build-win\Release\pane_cli.exe
+
       - name: Upload Windows executables
         uses: actions/upload-artifact@v4
         with:
