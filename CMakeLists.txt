@@ -141,10 +141,13 @@ else()
     # OpenSSL for HTTPS
     find_package(OpenSSL REQUIRED)
 
+    # zlib for gzip decompression
+    find_package(ZLIB REQUIRED)
+
     # HTTP client library
     add_library(pane_net src/net/http.c)
     target_include_directories(pane_net PUBLIC ${CMAKE_SOURCE_DIR}/src)
-    target_link_libraries(pane_net PUBLIC OpenSSL::SSL OpenSSL::Crypto)
+    target_link_libraries(pane_net PUBLIC OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB)
 
     # Font library
     add_library(pane_font src/font/font.c)

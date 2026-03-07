@@ -7,6 +7,8 @@
 #include "browser.h"
 #include "../html/tree_builder.h"
 #include "../net/http.h"
+#include "../layout/inline.h"
+#include "../font/font.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -22,6 +24,32 @@ static void update_scroll(BrowserWindow *bw);
 static BrowserTab *active(BrowserWindow *bw);
 static void update_plugin_button_style(GtkWidget *btn, bool enabled);
 static void dismiss_form_widget(BrowserWindow *bw);
+
+/* ── Font-based text measurement for layout ──────────────────────── */
+
+/* Cached fonts for layout text measurement. */
+static PaneFont *g_layout_font_regular = NULL;
+static PaneFont *g_layout_font_bold    = NULL;
+static PaneFont *g_layout_font_mono    = NULL;
+
+static float layout_measure_text_cb(const char *text, size_t len,
+                                     float font_size, bool bold,
+                                     bool monospace)
+{
+    PaneFont *f = NULL;
+    if (monospace && g_layout_font_mono)
+        f = g_layout_font_mono;
+    else if (bold && g_layout_font_bold)
+        f = g_layout_font_bold;
+    else
+        f = g_layout_font_regular;
+
+    if (!f) return (float)len * font_size * 0.6f; /* fallback */
+
+    font_set_size(f, font_size);
+    TextMetrics m = font_measure(f, text, len);
+    return m.width;
+}
 
 /* ── UTF-8 validation ──────────────────────────────────────────────── */
 
@@ -1881,6 +1909,14 @@ BrowserWindow *browser_window_new(void)
         fprintf(stderr, "pane: Warning: font system init failed\n");
     }
     bw->fonts_ready = true;
+
+    /* Set up font-based text measurement for the layout engine. */
+    if (!g_layout_font_regular) {
+        g_layout_font_regular = font_load("sans-serif", 16.0f, FONT_STYLE_NORMAL);
+        g_layout_font_bold    = font_load("sans-serif", 16.0f, FONT_STYLE_BOLD);
+        g_layout_font_mono    = font_load("monospace",  16.0f, FONT_STYLE_NORMAL);
+        layout_set_measure_fn(layout_measure_text_cb);
+    }
 
     /* ── Apply CSS ─────────────────────────────────────────────── */
 

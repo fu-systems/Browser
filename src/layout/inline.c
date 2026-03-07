@@ -10,16 +10,42 @@
 #include <string.h>
 #include <ctype.h>
 
+/* ── Text measurement callback ─────────────────────────────────────── */
+
+static LayoutMeasureTextFn g_measure_fn = NULL;
+
+void layout_set_measure_fn(LayoutMeasureTextFn fn)
+{
+    g_measure_fn = fn;
+}
+
 /* Approximate character width based on font size. */
 static float char_width(float font_size)
 {
     return font_size * 0.6f;  /* rough average for proportional fonts */
 }
 
-/* Measure a text run width (simplified: character count × avg width). */
-static float measure_text(const char *text, size_t len, float font_size)
+/* Measure a text run width using real font metrics if available. */
+static float measure_text_ex(const char *text, size_t len, float font_size,
+                              bool bold, bool monospace)
 {
+    if (g_measure_fn) {
+        return g_measure_fn(text, len, font_size, bold, monospace);
+    }
     return (float)len * char_width(font_size);
+}
+
+/* Convenience: measure with style info from a box. */
+static float measure_text_styled(const char *text, size_t len,
+                                  const ComputedStyle *style)
+{
+    float fs = style ? style->font_size : 16.0f;
+    bool bold = style && style->font_weight >= 600;
+    bool mono = style && style->font_family &&
+                (strcmp(style->font_family, "monospace") == 0 ||
+                 strcmp(style->font_family, "Courier") == 0 ||
+                 strcmp(style->font_family, "Courier New") == 0);
+    return measure_text_ex(text, len, fs, bold, mono);
 }
 
 /* Find the next word break position. */
@@ -52,7 +78,7 @@ void layout_inline(LayoutBox *box, float available_width, Arena *arena)
         /* Dimensions already set by apply_replaced_defaults. */
         /* If there's text to display (value/alt), measure it for the text run. */
         if (box->text && box->text_len > 0) {
-            float text_w = measure_text(box->text, box->text_len, font_size);
+            float text_w = measure_text_styled(box->text, box->text_len, box->style);
             /* For button-style elements, auto-size width to text. */
             float total_pad = box->padding.left + box->padding.right +
                               box->border.left + box->border.right;
@@ -88,7 +114,7 @@ void layout_inline(LayoutBox *box, float available_width, Arena *arena)
                 /* Measure until next newline or end. */
                 size_t line_end = pos;
                 while (line_end < len && text[line_end] != '\n') line_end++;
-                float run_w = measure_text(text + pos, line_end - pos, font_size);
+                float run_w = measure_text_styled(text + pos, line_end - pos, box->style);
                 x += run_w;
                 pos = line_end;
             }
@@ -105,7 +131,7 @@ void layout_inline(LayoutBox *box, float available_width, Arena *arena)
                 while (word_start < word_end && isspace((unsigned char)text[word_start]))
                     word_start++;
 
-                float word_w = measure_text(text + word_start, word_end - word_start, font_size);
+                float word_w = measure_text_styled(text + word_start, word_end - word_start, box->style);
 
                 /* Wrap if needed (unless nowrap). */
                 if (!no_wrap && x + word_w > available_width && x > 0) {
@@ -116,7 +142,7 @@ void layout_inline(LayoutBox *box, float available_width, Arena *arena)
 
                 x += word_w;
                 if (word_end < len && isspace((unsigned char)text[word_end - 1])) {
-                    x += char_width(font_size); /* space after word */
+                    x += measure_text_styled(" ", 1, box->style); /* space after word */
                 }
 
                 pos = word_end;

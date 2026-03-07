@@ -21,6 +21,7 @@
 
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <zlib.h>
 
 /* ── URL parsing ──────────────────────────────────────────────────── */
 
@@ -301,6 +302,57 @@ static int read_chunked(Connection *c, const char *leftover, size_t leftover_len
     return 0;
 }
 
+/* ── Gzip/deflate decompression ───────────────────────────────────── */
+
+static char *decompress_gzip(const char *data, size_t len, size_t *out_len)
+{
+    z_stream strm = {0};
+    /* windowBits = 15 + 32 to auto-detect gzip or zlib format. */
+    if (inflateInit2(&strm, 15 + 32) != Z_OK)
+        return NULL;
+
+    size_t out_cap = len * 4;
+    if (out_cap < 16384) out_cap = 16384;
+    char *out = malloc(out_cap);
+    if (!out) { inflateEnd(&strm); return NULL; }
+
+    strm.next_in = (Bytef *)data;
+    strm.avail_in = (uInt)len;
+
+    size_t total = 0;
+    int ret;
+    do {
+        if (total >= out_cap) {
+            out_cap *= 2;
+            if (out_cap > 32 * 1024 * 1024) { free(out); inflateEnd(&strm); return NULL; }
+            char *new_out = realloc(out, out_cap);
+            if (!new_out) { free(out); inflateEnd(&strm); return NULL; }
+            out = new_out;
+        }
+        strm.next_out = (Bytef *)(out + total);
+        strm.avail_out = (uInt)(out_cap - total);
+        ret = inflate(&strm, Z_NO_FLUSH);
+        if (ret == Z_STREAM_ERROR || ret == Z_DATA_ERROR || ret == Z_MEM_ERROR) {
+            free(out);
+            inflateEnd(&strm);
+            return NULL;
+        }
+        total = out_cap - strm.avail_out;
+    } while (ret != Z_STREAM_END && strm.avail_in > 0);
+
+    inflateEnd(&strm);
+
+    /* Null-terminate. */
+    if (total >= out_cap) {
+        char *new_out = realloc(out, total + 1);
+        if (!new_out) { free(out); return NULL; }
+        out = new_out;
+    }
+    out[total] = '\0';
+    *out_len = total;
+    return out;
+}
+
 /* ── Main HTTP GET ────────────────────────────────────────────────── */
 
 static HttpResponse *make_error(const char *msg)
@@ -324,7 +376,7 @@ static HttpResponse *http_get_one(const ParsedUrl *url)
         "Host: %s\r\n"
         "User-Agent: Pane/0.1\r\n"
         "Accept: text/html,application/xhtml+xml,*/*\r\n"
-        "Accept-Encoding: identity\r\n"
+        "Accept-Encoding: gzip, deflate, identity\r\n"
         "Connection: close\r\n"
         "\r\n",
         url->path, url->host);
@@ -414,6 +466,23 @@ static HttpResponse *http_get_one(const ParsedUrl *url)
 
     free(transfer_enc);
     free(content_len_str);
+
+    /* Decompress if Content-Encoding is gzip or deflate. */
+    char *content_enc = header_value(headers, "Content-Encoding");
+    if (content_enc && body.len > 0) {
+        if (strcasestr(content_enc, "gzip") || strcasestr(content_enc, "deflate")) {
+            size_t dec_len = 0;
+            char *decompressed = decompress_gzip(body.data, body.len, &dec_len);
+            if (decompressed) {
+                buf_free(&body);
+                body.data = decompressed;
+                body.len = dec_len;
+                body.cap = dec_len + 1;
+            }
+            /* If decompression fails, fall through with raw body. */
+        }
+    }
+    free(content_enc);
 
     /* Null-terminate body. */
     buf_ensure(&body, 1);

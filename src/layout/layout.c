@@ -21,6 +21,7 @@
 #include "../style/context.h"
 #include "../css/cascade.h"
 #include "../util/compat.h"
+#include "inline.h"
 #include <string.h>
 #include <stdlib.h>
 
