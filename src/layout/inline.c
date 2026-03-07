@@ -141,7 +141,7 @@ void layout_inline(LayoutBox *box, float available_width, Arena *arena)
                 }
 
                 x += word_w;
-                if (word_end < len && isspace((unsigned char)text[word_end - 1])) {
+                if (word_end < len && isspace((unsigned char)text[word_end])) {
                     x += measure_text_styled(" ", 1, box->style); /* space after word */
                 }
 

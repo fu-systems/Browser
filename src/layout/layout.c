@@ -24,6 +24,40 @@
 #include "inline.h"
 #include <string.h>
 #include <stdlib.h>
+#include <ctype.h>
+
+/* ── Whitespace normalization for text nodes (white-space: normal) ─ */
+
+/* Collapse runs of whitespace into single spaces; trim leading/trailing. */
+static const char *normalize_text(const char *text, size_t len,
+                                   size_t *out_len, Arena *arena)
+{
+    /* Allocate worst-case output (same length as input). */
+    char *buf = arena_alloc(arena, len + 1, 1);
+    size_t out = 0;
+    bool in_ws = true; /* true = skip leading whitespace */
+
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)text[i];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f') {
+            if (!in_ws) {
+                buf[out++] = ' ';
+                in_ws = true;
+            }
+        } else {
+            buf[out++] = (char)c;
+            in_ws = false;
+        }
+    }
+
+    /* Trim trailing space. */
+    if (out > 0 && buf[out - 1] == ' ')
+        out--;
+
+    buf[out] = '\0';
+    *out_len = out;
+    return buf;
+}
 
 /* ── Replaced element intrinsic sizes ────────────────────────────── */
 
@@ -413,8 +447,21 @@ static LayoutBox *build_layout_box(Document *doc,
         *text_style = *parent_style; /* inherit everything */
 
         LayoutBox *text_box = layout_box_create(arena, BOX_TEXT, node, text_style);
-        text_box->text = node->text.data;
-        text_box->text_len = node->text.len;
+
+        /* Normalize whitespace for normal white-space mode so that
+         * layout measurement and glyph rendering see the same text. */
+        WhiteSpace ws = text_style->white_space;
+        if (ws == WS_NORMAL || ws == WS_NOWRAP) {
+            size_t norm_len = 0;
+            const char *norm = normalize_text(node->text.data, node->text.len,
+                                               &norm_len, arena);
+            if (norm_len == 0) return NULL; /* collapsed to nothing */
+            text_box->text = norm;
+            text_box->text_len = norm_len;
+        } else {
+            text_box->text = node->text.data;
+            text_box->text_len = node->text.len;
+        }
         return text_box;
     }
 
