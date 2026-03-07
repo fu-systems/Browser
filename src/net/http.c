@@ -200,7 +200,11 @@ static void buf_ensure(Buffer *b, size_t extra)
     if (b->len + extra > b->cap) {
         size_t new_cap = b->cap ? b->cap * 2 : 4096;
         while (new_cap < b->len + extra) new_cap *= 2;
-        b->data = realloc(b->data, new_cap);
+        /* Hard limit: 8MB to prevent OOM on huge responses. */
+        if (new_cap > 8 * 1024 * 1024) return;
+        char *new_data = realloc(b->data, new_cap);
+        if (!new_data) return;
+        b->data = new_data;
         b->cap = new_cap;
     }
 }
@@ -208,6 +212,7 @@ static void buf_ensure(Buffer *b, size_t extra)
 static void buf_append(Buffer *b, const char *data, size_t len)
 {
     buf_ensure(b, len);
+    if (b->len + len > b->cap) return; /* buf_ensure failed (size limit) */
     memcpy(b->data + b->len, data, len);
     b->len += len;
 }
@@ -324,7 +329,7 @@ static char *decompress_gzip(const char *data, size_t len, size_t *out_len)
     do {
         if (total >= out_cap) {
             out_cap *= 2;
-            if (out_cap > 32 * 1024 * 1024) { free(out); inflateEnd(&strm); return NULL; }
+            if (out_cap > 8 * 1024 * 1024) { free(out); inflateEnd(&strm); return NULL; }
             char *new_out = realloc(out, out_cap);
             if (!new_out) { free(out); inflateEnd(&strm); return NULL; }
             out = new_out;

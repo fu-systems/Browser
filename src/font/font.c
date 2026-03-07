@@ -14,6 +14,27 @@
 
 static FT_Library ft_lib = NULL;
 
+/* ── Glyph width cache ─────────────────────────────────────────────── */
+
+/* Cache advance widths to avoid repeated FT_Load_Glyph calls during layout.
+ * Keyed by (codepoint, size_px_int) → advance width. */
+#define GLYPH_CACHE_SIZE 4096  /* must be power of 2 */
+
+typedef struct {
+    uint32_t key;        /* packed (codepoint ^ size_hash) */
+    uint32_t codepoint;
+    uint16_t size_x10;   /* font size * 10, truncated */
+    float    width;
+} GlyphCacheEntry;
+
+static GlyphCacheEntry g_glyph_cache[GLYPH_CACHE_SIZE];
+
+static inline uint32_t glyph_cache_hash(uint32_t cp, uint16_t size_x10)
+{
+    uint32_t h = cp * 2654435761u ^ (uint32_t)size_x10 * 40503u;
+    return h & (GLYPH_CACHE_SIZE - 1);
+}
+
 /* ── Font structure ────────────────────────────────────────────────── */
 
 struct PaneFont {
@@ -160,13 +181,30 @@ float font_char_width(PaneFont *font, uint32_t codepoint)
 {
     if (!font) return 8.0f;
 
+    /* Check glyph width cache. */
+    uint16_t size_x10 = (uint16_t)(font->size_px * 10.0f);
+    uint32_t idx = glyph_cache_hash(codepoint, size_x10);
+    GlyphCacheEntry *entry = &g_glyph_cache[idx];
+    if (entry->codepoint == codepoint && entry->size_x10 == size_x10) {
+        return entry->width;
+    }
+
     FT_UInt glyph_idx = FT_Get_Char_Index(font->face, codepoint);
     if (!glyph_idx) glyph_idx = FT_Get_Char_Index(font->face, '?');
 
-    FT_Error err = FT_Load_Glyph(font->face, glyph_idx, FT_LOAD_DEFAULT);
+    /* Use FT_LOAD_NO_BITMAP for faster metric-only loading. */
+    FT_Error err = FT_Load_Glyph(font->face, glyph_idx,
+                                  FT_LOAD_DEFAULT | FT_LOAD_NO_BITMAP);
     if (err) return font->size_px * 0.6f;
 
-    return (float)font->face->glyph->advance.x / 64.0f;
+    float width = (float)font->face->glyph->advance.x / 64.0f;
+
+    /* Store in cache. */
+    entry->codepoint = codepoint;
+    entry->size_x10 = size_x10;
+    entry->width = width;
+
+    return width;
 }
 
 /* ── Text measurement ──────────────────────────────────────────────── */

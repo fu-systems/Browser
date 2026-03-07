@@ -402,6 +402,9 @@ static char *fetch_external_css(const char *html, size_t html_len,
 
     const char *p = html;
     const char *end = html + html_len;
+    int fetch_count = 0;
+    const int MAX_CSS_FETCHES = 5;
+    const size_t MAX_CSS_TOTAL = 512 * 1024;
 
     while (p < end) {
         /* Find <link */
@@ -489,8 +492,15 @@ static char *fetch_external_css(const char *html, size_t html_len,
         resolve_url(base_url, href_buf, resolved, sizeof(resolved));
         if (!resolved[0]) { p = tag_end + 1; continue; }
 
+        /* Limit CSS fetches. */
+        if (fetch_count >= MAX_CSS_FETCHES || css_len >= MAX_CSS_TOTAL) {
+            p = tag_end + 1;
+            continue;
+        }
+
         /* Fetch CSS. */
         HttpResponse *css_resp = http_get(resolved, 3);
+        fetch_count++;
         if (css_resp && !css_resp->error && css_resp->body && css_resp->body_len > 0) {
             size_t needed = css_len + css_resp->body_len + 2;
             while (needed > css_cap) {
