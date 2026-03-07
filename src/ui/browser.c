@@ -24,6 +24,8 @@ static void update_scroll(BrowserWindow *bw);
 static BrowserTab *active(BrowserWindow *bw);
 static void update_plugin_button_style(GtkWidget *btn, bool enabled);
 static void dismiss_form_widget(BrowserWindow *bw);
+static gboolean on_form_widget_focus_out(GtkWidget *widget, GdkEvent *event,
+                                          gpointer data);
 
 /* ── Font-based text measurement for layout ──────────────────────── */
 
@@ -1052,26 +1054,36 @@ static void dismiss_form_widget(BrowserWindow *bw)
 {
     if (!bw->active_form_widget) return;
 
+    /* Grab the widget pointer and clear state BEFORE destroying,
+     * because gtk_widget_destroy triggers focus-out which would
+     * re-enter this function. */
+    GtkWidget *widget = bw->active_form_widget;
+    const DomNode *form_node = bw->active_form_node;
+    bw->active_form_widget = NULL;
+    bw->active_form_node = NULL;
+
     BrowserTab *tab = active(bw);
-    if (tab && bw->active_form_node) {
+    if (tab && form_node) {
         /* Save the current text value. */
-        if (GTK_IS_ENTRY(bw->active_form_widget)) {
-            const char *text = gtk_entry_get_text(GTK_ENTRY(bw->active_form_widget));
-            tab_set_form_value(tab, bw->active_form_node, text);
-        } else if (GTK_IS_TEXT_VIEW(bw->active_form_widget)) {
+        if (GTK_IS_ENTRY(widget)) {
+            const char *text = gtk_entry_get_text(GTK_ENTRY(widget));
+            tab_set_form_value(tab, form_node, text);
+        } else if (GTK_IS_TEXT_VIEW(widget)) {
             GtkTextBuffer *buf = gtk_text_view_get_buffer(
-                GTK_TEXT_VIEW(bw->active_form_widget));
+                GTK_TEXT_VIEW(widget));
             GtkTextIter start, end;
             gtk_text_buffer_get_bounds(buf, &start, &end);
             char *text = gtk_text_buffer_get_text(buf, &start, &end, FALSE);
-            tab_set_form_value(tab, bw->active_form_node, text);
+            tab_set_form_value(tab, form_node, text);
             g_free(text);
         }
     }
 
-    gtk_widget_destroy(bw->active_form_widget);
-    bw->active_form_widget = NULL;
-    bw->active_form_node = NULL;
+    /* Disconnect focus-out handler to prevent reentrant calls during destroy. */
+    g_signal_handlers_disconnect_by_func(widget,
+        G_CALLBACK(on_form_widget_focus_out), bw);
+
+    gtk_widget_destroy(widget);
 
     /* Return focus to content area. */
     gtk_widget_grab_focus(bw->content_area);
@@ -1177,10 +1189,14 @@ static gboolean on_form_widget_key_press(GtkWidget *widget, GdkEventKey *event,
 {
     if (event->keyval == GDK_KEY_Escape) {
         BrowserWindow *bw = data;
-        /* Dismiss without saving — just destroy. */
-        gtk_widget_destroy(bw->active_form_widget);
+        if (!bw->active_form_widget) return TRUE;
+        /* Dismiss without saving — clear state first to prevent reentry. */
+        GtkWidget *w = bw->active_form_widget;
         bw->active_form_widget = NULL;
         bw->active_form_node = NULL;
+        g_signal_handlers_disconnect_by_func(w,
+            G_CALLBACK(on_form_widget_focus_out), bw);
+        gtk_widget_destroy(w);
         gtk_widget_grab_focus(bw->content_area);
         return TRUE;
     }
