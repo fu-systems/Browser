@@ -275,11 +275,35 @@ bool selector_list_matches(const SelectorList *list, const DomNode *elem)
 
 /* ── Selector Parsing ───────────────────────────────────────────────── */
 
+/* Grow a SelectorList's capacity. */
+static void sellist_grow(SelectorList *sl, Arena *arena)
+{
+    int new_cap = sl->cap * 2;
+    Selector *new_sels = arena_alloc(arena, new_cap * sizeof(Selector), 8);
+    memcpy(new_sels, sl->selectors, sl->count * sizeof(Selector));
+    sl->selectors = new_sels;
+    sl->cap = new_cap;
+}
+
+/* Grow a Selector's compound capacity. */
+static void sel_grow(Selector *sel, Arena *arena)
+{
+    int new_cap = sel->cap * 2;
+    CompoundSelector *new_cs = arena_alloc(arena, new_cap * sizeof(CompoundSelector), 8);
+    memcpy(new_cs, sel->compounds, sel->count * sizeof(CompoundSelector));
+    sel->compounds = new_cs;
+    Combinator *new_comb = arena_alloc(arena, new_cap * sizeof(Combinator), 4);
+    if (sel->count > 0)
+        memcpy(new_comb, sel->combinators, sel->count * sizeof(Combinator));
+    sel->combinators = new_comb;
+    sel->cap = new_cap;
+}
+
 bool selector_parse(const char *input, size_t len, Arena *arena,
                     SelectorList *out)
 {
     out->count = 0;
-    out->cap = 4;
+    out->cap = 8;
     out->selectors = arena_alloc(arena, out->cap * sizeof(Selector), 8);
 
     CssTokenizer t;
@@ -313,7 +337,9 @@ bool selector_parse(const char *input, size_t len, Arena *arena,
                       (peek.delim == '>' || peek.delim == '+' || peek.delim == '~'))) {
                     /* Finalize current compound, start new with descendant combinator. */
                     cur_sel->count++;
-                    if (cur_sel->count >= cur_sel->cap) break; /* overflow */
+                    if (cur_sel->count >= cur_sel->cap) {
+                        sel_grow(cur_sel, arena);
+                    }
                     cur_sel->combinators[cur_sel->count - 1] = COMB_DESCENDANT;
                     cur_cs = &cur_sel->compounds[cur_sel->count];
                     memset(cur_cs, 0, sizeof(*cur_cs));
@@ -329,7 +355,9 @@ bool selector_parse(const char *input, size_t len, Arena *arena,
             /* Finalize current selector, start new. */
             if (in_compound) cur_sel->count++;
             out->count++;
-            if (out->count >= out->cap) break;
+            if (out->count >= out->cap) {
+                sellist_grow(out, arena);
+            }
             cur_sel = &out->selectors[out->count];
             cur_sel->count = 0;
             cur_sel->cap = 4;
@@ -374,7 +402,9 @@ bool selector_parse(const char *input, size_t len, Arena *arena,
 
             if (comb != COMB_NONE && in_compound) {
                 cur_sel->count++;
-                if (cur_sel->count >= cur_sel->cap) break;
+                if (cur_sel->count >= cur_sel->cap) {
+                    sel_grow(cur_sel, arena);
+                }
                 cur_sel->combinators[cur_sel->count - 1] = comb;
                 cur_cs = &cur_sel->compounds[cur_sel->count];
                 memset(cur_cs, 0, sizeof(*cur_cs));
