@@ -299,8 +299,8 @@ static int read_chunked(Connection *c, const char *leftover, size_t leftover_len
         if (n <= 0) break;
         buf_append(&raw, tmp, n);
 
-        /* Safety limit: 16 MB. */
-        if (raw.len > 16 * 1024 * 1024) break;
+        /* Safety limit: 8 MB. */
+        if (raw.len > 8 * 1024 * 1024) break;
     }
 
     buf_free(&raw);
@@ -464,7 +464,7 @@ static HttpResponse *http_get_one(const ParsedUrl *url)
                 int n = conn_read(&conn, tmp, sizeof(tmp));
                 if (n <= 0) break;
                 buf_append(&body, tmp, n);
-                if (body.len > 16 * 1024 * 1024) break;  /* 16 MB limit. */
+                if (body.len > 8 * 1024 * 1024) break;  /* 8 MB limit. */
             }
         }
     }
@@ -491,7 +491,10 @@ static HttpResponse *http_get_one(const ParsedUrl *url)
 
     /* Null-terminate body. */
     buf_ensure(&body, 1);
-    body.data[body.len] = '\0';
+    if (body.data && body.len < body.cap)
+        body.data[body.len] = '\0';
+    else if (body.data && body.len > 0)
+        body.data[body.len - 1] = '\0';  /* truncate last byte for safety */
 
     resp->body = body.data;
     resp->body_len = body.len;

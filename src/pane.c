@@ -106,16 +106,33 @@ PaneResult pane_render(const char *html, size_t html_len,
         result.stylesheet = css_parse_stylesheet(css, css_len);
     }
 
-    /* Also extract <style> elements from DOM. */
+    /* Also extract <style> elements from DOM — concatenate all into one. */
     Stylesheet *inline_ss = NULL;
     if (result.document->head) {
+        /* Collect all <style> content into a single buffer. */
+        size_t style_cap = 0, style_len = 0;
+        char *style_buf = NULL;
         for (DomNode *n = result.document->head->first_child; n; n = n->next_sibling) {
             if (n->type == PANE_NODE_ELEMENT && n->elem.tag == TAG_STYLE) {
                 DomNode *text = n->first_child;
                 if (text && text->type == PANE_NODE_TEXT && text->text.data) {
-                    inline_ss = css_parse_stylesheet(text->text.data, text->text.len);
+                    size_t need = style_len + text->text.len + 2;
+                    if (need > style_cap) {
+                        style_cap = need > 4096 ? need : 4096;
+                        char *nb = realloc(style_buf, style_cap);
+                        if (!nb) break;
+                        style_buf = nb;
+                    }
+                    if (style_len > 0) style_buf[style_len++] = '\n';
+                    memcpy(style_buf + style_len, text->text.data, text->text.len);
+                    style_len += text->text.len;
                 }
             }
+        }
+        if (style_buf && style_len > 0) {
+            style_buf[style_len] = '\0';
+            inline_ss = css_parse_stylesheet(style_buf, style_len);
+            free(style_buf);
         }
     }
 

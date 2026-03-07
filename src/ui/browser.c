@@ -2132,6 +2132,12 @@ void browser_window_free(BrowserWindow *bw)
     if (bw->plugin_registry) plugin_registry_free(bw->plugin_registry);
     if (bw->plugin_context)  plugin_context_free(bw->plugin_context);
 
+    /* Free layout measurement fonts. */
+    if (g_layout_font_regular) { font_free(g_layout_font_regular); g_layout_font_regular = NULL; }
+    if (g_layout_font_bold)    { font_free(g_layout_font_bold);    g_layout_font_bold = NULL; }
+    if (g_layout_font_mono)    { font_free(g_layout_font_mono);    g_layout_font_mono = NULL; }
+    layout_set_measure_fn(NULL);
+
     font_system_shutdown();
     free(bw);
 }
