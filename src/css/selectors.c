@@ -285,6 +285,16 @@ static void sellist_grow(SelectorList *sl, Arena *arena)
     sl->cap = new_cap;
 }
 
+/* Grow a CompoundSelector's parts capacity. */
+static void cs_grow(CompoundSelector *cs, Arena *arena)
+{
+    int new_cap = cs->part_cap * 2;
+    SelectorPart *new_parts = arena_alloc(arena, new_cap * sizeof(SelectorPart), 8);
+    memcpy(new_parts, cs->parts, cs->part_count * sizeof(SelectorPart));
+    cs->parts = new_parts;
+    cs->part_cap = new_cap;
+}
+
 /* Grow a Selector's compound capacity. */
 static void sel_grow(Selector *sel, Arena *arena)
 {
@@ -378,23 +388,23 @@ bool selector_parse(const char *input, size_t len, Arena *arena,
             else if (tok.delim == '~') comb = COMB_SUBSEQUENT;
             else if (tok.delim == '*') {
                 /* Universal selector. */
-                if (cur_cs->part_count < cur_cs->part_cap) {
+                if (cur_cs->part_count >= cur_cs->part_cap)
+                        cs_grow(cur_cs, arena);
                     cur_cs->parts[cur_cs->part_count++] = (SelectorPart){
                         .type = SEL_UNIVERSAL
                     };
-                }
                 in_compound = true;
                 continue;
             }
             else if (tok.delim == '.') {
                 /* Class selector. */
                 if (css_tokenizer_next(&t, &tok) && tok.type == CSSTOK_IDENT) {
-                    if (cur_cs->part_count < cur_cs->part_cap) {
-                        cur_cs->parts[cur_cs->part_count++] = (SelectorPart){
-                            .type = SEL_CLASS,
-                            .name = arena_strndup(arena, tok.start, tok.len),
-                        };
-                    }
+                    if (cur_cs->part_count >= cur_cs->part_cap)
+                        cs_grow(cur_cs, arena);
+                    cur_cs->parts[cur_cs->part_count++] = (SelectorPart){
+                        .type = SEL_CLASS,
+                        .name = arena_strndup(arena, tok.start, tok.len),
+                    };
                     in_compound = true;
                 }
                 continue;
@@ -419,22 +429,22 @@ bool selector_parse(const char *input, size_t len, Arena *arena,
             /* Type selector. */
             char *name = arena_strndup(arena, tok.start, tok.len);
             str_ascii_lower(name, tok.len);
-            if (cur_cs->part_count < cur_cs->part_cap) {
-                cur_cs->parts[cur_cs->part_count++] = (SelectorPart){
-                    .type = SEL_TYPE, .name = name,
-                };
-            }
+            if (cur_cs->part_count >= cur_cs->part_cap)
+                cs_grow(cur_cs, arena);
+            cur_cs->parts[cur_cs->part_count++] = (SelectorPart){
+                .type = SEL_TYPE, .name = name,
+            };
             in_compound = true;
             continue;
         }
 
         if (tok.type == CSSTOK_HASH) {
-            if (cur_cs->part_count < cur_cs->part_cap) {
-                cur_cs->parts[cur_cs->part_count++] = (SelectorPart){
-                    .type = SEL_ID,
-                    .name = arena_strndup(arena, tok.start, tok.len),
-                };
-            }
+            if (cur_cs->part_count >= cur_cs->part_cap)
+                cs_grow(cur_cs, arena);
+            cur_cs->parts[cur_cs->part_count++] = (SelectorPart){
+                .type = SEL_ID,
+                .name = arena_strndup(arena, tok.start, tok.len),
+            };
             in_compound = true;
             continue;
         }
@@ -451,12 +461,12 @@ bool selector_parse(const char *input, size_t len, Arena *arena,
             }
 
             if (next.type == CSSTOK_IDENT || next.type == CSSTOK_FUNCTION) {
-                if (cur_cs->part_count < cur_cs->part_cap) {
-                    cur_cs->parts[cur_cs->part_count++] = (SelectorPart){
-                        .type = ptype,
-                        .name = arena_strndup(arena, next.start, next.len),
-                    };
-                }
+                if (cur_cs->part_count >= cur_cs->part_cap)
+                    cs_grow(cur_cs, arena);
+                cur_cs->parts[cur_cs->part_count++] = (SelectorPart){
+                    .type = ptype,
+                    .name = arena_strndup(arena, next.start, next.len),
+                };
                 /* For function pseudo-classes, include arguments in the name. */
                 if (next.type == CSSTOK_FUNCTION) {
                     /* Collect "name(args)" into the name field. */
@@ -499,11 +509,11 @@ bool selector_parse(const char *input, size_t len, Arena *arena,
             if (!css_tokenizer_next(&t, &op_tok)) break;
 
             if (op_tok.type == CSSTOK_RBRACKET) {
-                if (cur_cs->part_count < cur_cs->part_cap) {
-                    cur_cs->parts[cur_cs->part_count++] = (SelectorPart){
-                        .type = SEL_ATTR_EXISTS, .name = attr_name,
-                    };
-                }
+                if (cur_cs->part_count >= cur_cs->part_cap)
+                    cs_grow(cur_cs, arena);
+                cur_cs->parts[cur_cs->part_count++] = (SelectorPart){
+                    .type = SEL_ATTR_EXISTS, .name = attr_name,
+                };
                 in_compound = true;
                 continue;
             }
@@ -530,11 +540,11 @@ bool selector_parse(const char *input, size_t len, Arena *arena,
                    val_tok.type != CSSTOK_RBRACKET &&
                    val_tok.type != CSSTOK_EOF) {}
 
-            if (cur_cs->part_count < cur_cs->part_cap) {
-                cur_cs->parts[cur_cs->part_count++] = (SelectorPart){
-                    .type = stype, .name = attr_name, .value = val,
-                };
-            }
+            if (cur_cs->part_count >= cur_cs->part_cap)
+                cs_grow(cur_cs, arena);
+            cur_cs->parts[cur_cs->part_count++] = (SelectorPart){
+                .type = stype, .name = attr_name, .value = val,
+            };
             in_compound = true;
             continue;
         }
