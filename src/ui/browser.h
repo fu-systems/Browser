@@ -27,6 +27,13 @@
 
 #define MAX_TABS 32
 #define MAX_HISTORY 64
+#define MAX_FORM_VALUES 128
+
+/* Stores a form field value (kept per-tab so values survive re-render). */
+typedef struct {
+    const DomNode  *node;      /* DOM node this value belongs to */
+    char           *value;     /* heap-allocated current value */
+} FormFieldValue;
 
 typedef struct {
     char         title[256];
@@ -48,6 +55,10 @@ typedef struct {
 
     /* Per-tab plugin settings. */
     bool         cookies_enabled;  /* per-tab cookie toggle */
+
+    /* Form interaction state. */
+    FormFieldValue  form_values[MAX_FORM_VALUES];
+    int             form_value_count;
 
     /* Tab widget (label in tab bar). */
     GtkWidget   *tab_label;
@@ -95,6 +106,12 @@ typedef struct {
     GtkWidget       *privacy_btn;
     GtkWidget       *darkmode_btn;
     GtkWidget       *cookie_btn;
+
+    /* Form overlay: native GTK widgets positioned over form elements. */
+    GtkWidget       *content_overlay;   /* GtkOverlay wrapping content_area */
+    GtkWidget       *form_fixed;        /* GtkFixed for positioned form widgets */
+    GtkWidget       *active_form_widget; /* Currently focused form widget */
+    const DomNode   *active_form_node;   /* DOM node of focused form element */
 } BrowserWindow;
 
 /* ── API ────────────────────────────────────────────────────────────── */

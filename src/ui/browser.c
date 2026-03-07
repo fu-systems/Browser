@@ -21,6 +21,7 @@ static void update_nav_buttons(BrowserWindow *bw);
 static void update_scroll(BrowserWindow *bw);
 static BrowserTab *active(BrowserWindow *bw);
 static void update_plugin_button_style(GtkWidget *btn, bool enabled);
+static void dismiss_form_widget(BrowserWindow *bw);
 
 /* ── UTF-8 validation ──────────────────────────────────────────────── */
 
@@ -65,6 +66,123 @@ static char *sanitize_utf8(char *buf, size_t len)
         }
     }
     return buf;
+}
+
+/* ── Form value management ─────────────────────────────────────────── */
+
+static void tab_clear_form_values(BrowserTab *tab)
+{
+    for (int i = 0; i < tab->form_value_count; i++)
+        free(tab->form_values[i].value);
+    tab->form_value_count = 0;
+}
+
+static const char *tab_get_form_value(BrowserTab *tab, const DomNode *node)
+{
+    for (int i = 0; i < tab->form_value_count; i++) {
+        if (tab->form_values[i].node == node)
+            return tab->form_values[i].value;
+    }
+    return NULL;
+}
+
+static void tab_set_form_value(BrowserTab *tab, const DomNode *node,
+                               const char *value)
+{
+    for (int i = 0; i < tab->form_value_count; i++) {
+        if (tab->form_values[i].node == node) {
+            free(tab->form_values[i].value);
+            tab->form_values[i].value = strdup(value);
+            return;
+        }
+    }
+    if (tab->form_value_count < MAX_FORM_VALUES) {
+        tab->form_values[tab->form_value_count].node = node;
+        tab->form_values[tab->form_value_count].value = strdup(value);
+        tab->form_value_count++;
+    }
+}
+
+/* ── Layout box position helper ────────────────────────────────────── */
+
+/* Compute absolute page-space position of a layout box. */
+static void layout_box_abs_position(const LayoutBox *box, float *out_x, float *out_y)
+{
+    float x = 0, y = 0;
+    for (const LayoutBox *b = box; b; b = b->parent) {
+        x += b->rect.x;
+        y += b->rect.y;
+    }
+    *out_x = x;
+    *out_y = y;
+}
+
+/* ── Form element detection ────────────────────────────────────────── */
+
+/* Walk up from a layout box to find a form element (input/textarea/button). */
+static const DomNode *find_form_element(const LayoutBox *box)
+{
+    while (box) {
+        if (box->node && box->node->type == PANE_NODE_ELEMENT) {
+            HtmlTag tag = box->node->elem.tag;
+            if (tag == TAG_INPUT || tag == TAG_TEXTAREA ||
+                tag == TAG_BUTTON || tag == TAG_SELECT)
+                return box->node;
+        }
+        box = box->parent;
+    }
+    return NULL;
+}
+
+/* Find the layout box associated with a DOM node. */
+static const LayoutBox *find_box_for_node(const LayoutBox *root,
+                                           const DomNode *node)
+{
+    if (!root) return NULL;
+    if (root->node == node) return root;
+    for (LayoutBox *child = root->first_child; child; child = child->next_sibling) {
+        const LayoutBox *found = find_box_for_node(child, node);
+        if (found) return found;
+    }
+    return NULL;
+}
+
+/* Find the parent <form> element of a DOM node. */
+static const DomNode *find_form_parent(const DomNode *node)
+{
+    for (const DomNode *n = node->parent; n; n = n->parent) {
+        if (n->type == PANE_NODE_ELEMENT && n->elem.tag == TAG_FORM)
+            return n;
+    }
+    return NULL;
+}
+
+/* Check if an input type is text-editable. */
+static bool is_text_input(const DomNode *node)
+{
+    if (node->elem.tag == TAG_TEXTAREA) return true;
+    if (node->elem.tag == TAG_INPUT) {
+        const char *type = elem_get_attr(node, "type");
+        if (!type) return true; /* default is text */
+        return (strcmp(type, "text") == 0 || strcmp(type, "search") == 0 ||
+                strcmp(type, "email") == 0 || strcmp(type, "password") == 0 ||
+                strcmp(type, "url") == 0 || strcmp(type, "tel") == 0 ||
+                strcmp(type, "number") == 0);
+    }
+    return false;
+}
+
+/* Check if a node is a clickable button. */
+static bool is_button_element(const DomNode *node)
+{
+    if (node->elem.tag == TAG_BUTTON) return true;
+    if (node->elem.tag == TAG_INPUT) {
+        const char *type = elem_get_attr(node, "type");
+        if (type && (strcmp(type, "submit") == 0 || strcmp(type, "button") == 0 ||
+                     strcmp(type, "reset") == 0))
+            return true;
+    }
+    return false;
 }
 
 /* ── Default pages ─────────────────────────────────────────────────── */
@@ -157,6 +275,7 @@ static void tab_free_content(BrowserTab *tab)
         pane_result_free(&tab->result);
         tab->has_content = false;
     }
+    tab_clear_form_values(tab);
 }
 
 static void tab_free_history(BrowserTab *tab)
@@ -445,6 +564,9 @@ void browser_navigate(BrowserWindow *bw, const char *url)
 {
     BrowserTab *tab = active(bw);
     if (!tab) return;
+
+    /* Dismiss any active form widget before navigation. */
+    dismiss_form_widget(bw);
 
     /* Run plugin navigation hook (may modify or cancel URL). */
     char nav_url[4096];
@@ -895,6 +1017,340 @@ static const DomNode *find_link_ancestor(const LayoutBox *box)
     return NULL;
 }
 
+/* ── Form overlay management ───────────────────────────────────────── */
+
+/* Dismiss (destroy) the currently active form widget, saving its value. */
+static void dismiss_form_widget(BrowserWindow *bw)
+{
+    if (!bw->active_form_widget) return;
+
+    BrowserTab *tab = active(bw);
+    if (tab && bw->active_form_node) {
+        /* Save the current text value. */
+        if (GTK_IS_ENTRY(bw->active_form_widget)) {
+            const char *text = gtk_entry_get_text(GTK_ENTRY(bw->active_form_widget));
+            tab_set_form_value(tab, bw->active_form_node, text);
+        } else if (GTK_IS_TEXT_VIEW(bw->active_form_widget)) {
+            GtkTextBuffer *buf = gtk_text_view_get_buffer(
+                GTK_TEXT_VIEW(bw->active_form_widget));
+            GtkTextIter start, end;
+            gtk_text_buffer_get_bounds(buf, &start, &end);
+            char *text = gtk_text_buffer_get_text(buf, &start, &end, FALSE);
+            tab_set_form_value(tab, bw->active_form_node, text);
+            g_free(text);
+        }
+    }
+
+    gtk_widget_destroy(bw->active_form_widget);
+    bw->active_form_widget = NULL;
+    bw->active_form_node = NULL;
+
+    /* Return focus to content area. */
+    gtk_widget_grab_focus(bw->content_area);
+}
+
+/* Handle Enter key in a form entry — submit the form or just dismiss. */
+static void on_form_entry_activate(GtkWidget *widget, gpointer data)
+{
+    BrowserWindow *bw = data;
+    BrowserTab *tab = active(bw);
+
+    if (tab && bw->active_form_node) {
+        /* Save value. */
+        const char *text = gtk_entry_get_text(GTK_ENTRY(widget));
+        tab_set_form_value(tab, bw->active_form_node, text);
+
+        /* Try to submit the parent form. */
+        const DomNode *form = find_form_parent(bw->active_form_node);
+        if (form) {
+            const char *action = elem_get_attr(form, "action");
+            const char *method = elem_get_attr(form, "method");
+            bool is_get = !method || strcasecmp(method, "get") == 0;
+
+            /* Build query string from form fields. */
+            char query[4096] = {0};
+            size_t qlen = 0;
+
+            for (DomNode *n = dom_next_in_tree(form, form); n;
+                 n = dom_next_in_tree(n, form)) {
+                if (n->type != PANE_NODE_ELEMENT) continue;
+                if (n->elem.tag != TAG_INPUT && n->elem.tag != TAG_TEXTAREA)
+                    continue;
+
+                const char *name = elem_get_attr(n, "name");
+                if (!name || !name[0]) continue;
+
+                const char *val = tab_get_form_value(tab, n);
+                if (!val) {
+                    val = elem_get_attr(n, "value");
+                    if (!val) val = "";
+                }
+
+                /* Skip submit buttons that aren't the one clicked. */
+                if (n->elem.tag == TAG_INPUT) {
+                    const char *itype = elem_get_attr(n, "type");
+                    if (itype && (strcmp(itype, "submit") == 0 ||
+                                  strcmp(itype, "button") == 0))
+                        continue;
+                    if (itype && strcmp(itype, "hidden") == 0) {
+                        /* Include hidden fields. */
+                    }
+                }
+
+                if (qlen > 0 && qlen < sizeof(query) - 1)
+                    query[qlen++] = '&';
+
+                /* Simple URL encoding: just append name=value. */
+                int written = snprintf(query + qlen, sizeof(query) - qlen,
+                                       "%s=%s", name, val);
+                if (written > 0) qlen += (size_t)written;
+            }
+
+            /* Build final URL. */
+            char final_url[4096];
+            if (action && action[0]) {
+                char resolved_action[2048];
+                resolve_url(tab->url, action, resolved_action,
+                            sizeof(resolved_action));
+                if (is_get && qlen > 0)
+                    snprintf(final_url, sizeof(final_url), "%s?%s",
+                             resolved_action, query);
+                else
+                    snprintf(final_url, sizeof(final_url), "%s", resolved_action);
+            } else {
+                /* No action — submit to current URL. */
+                if (is_get && qlen > 0)
+                    snprintf(final_url, sizeof(final_url), "%s?%s", tab->url, query);
+                else
+                    snprintf(final_url, sizeof(final_url), "%s", tab->url);
+            }
+
+            dismiss_form_widget(bw);
+            browser_navigate(bw, final_url);
+            return;
+        }
+    }
+
+    dismiss_form_widget(bw);
+}
+
+/* Handle focus-out on form widget — save and dismiss. */
+static gboolean on_form_widget_focus_out(GtkWidget *widget, GdkEvent *event,
+                                          gpointer data)
+{
+    BrowserWindow *bw = data;
+    dismiss_form_widget(bw);
+    return FALSE;
+}
+
+/* Handle Escape key in form widget — dismiss without saving. */
+static gboolean on_form_widget_key_press(GtkWidget *widget, GdkEventKey *event,
+                                          gpointer data)
+{
+    if (event->keyval == GDK_KEY_Escape) {
+        BrowserWindow *bw = data;
+        /* Dismiss without saving — just destroy. */
+        gtk_widget_destroy(bw->active_form_widget);
+        bw->active_form_widget = NULL;
+        bw->active_form_node = NULL;
+        gtk_widget_grab_focus(bw->content_area);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+/* Spawn a GTK Entry or TextView over a text input/textarea. */
+static void spawn_form_widget(BrowserWindow *bw, const DomNode *node,
+                               const LayoutBox *box)
+{
+    if (!bw->form_fixed) return;
+
+    /* Dismiss any existing form widget. */
+    dismiss_form_widget(bw);
+
+    BrowserTab *tab = active(bw);
+    if (!tab) return;
+
+    /* Compute absolute position. */
+    float abs_x, abs_y;
+    layout_box_abs_position(box, &abs_x, &abs_y);
+
+    /* Convert to screen coordinates (subtract scroll). */
+    int sx = (int)(abs_x - tab->scroll_x);
+    int sy = (int)(abs_y - tab->scroll_y);
+    int sw = (int)(box->rect.width + box->padding.left + box->padding.right);
+    int sh = (int)(box->rect.height + box->padding.top + box->padding.bottom);
+
+    /* Clamp to visible area. */
+    if (sx < 0) { sw += sx; sx = 0; }
+    if (sy < 0) { sh += sy; sy = 0; }
+    if (sw < 20) sw = 20;
+    if (sh < 16) sh = 16;
+
+    /* Get initial value. */
+    const char *initial = tab_get_form_value(tab, node);
+    if (!initial) {
+        initial = elem_get_attr(node, "value");
+        if (!initial && node->elem.tag == TAG_TEXTAREA) {
+            /* Textarea content comes from child text nodes. */
+            DomNode *tc = node->first_child;
+            if (tc && tc->type == PANE_NODE_TEXT && tc->text.data)
+                initial = tc->text.data;
+        }
+    }
+    if (!initial) initial = "";
+
+    GtkWidget *widget;
+    if (node->elem.tag == TAG_TEXTAREA) {
+        /* Use a GtkTextView for textarea. */
+        widget = gtk_text_view_new();
+        GtkTextBuffer *buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(widget));
+        gtk_text_buffer_set_text(buf, initial, -1);
+        gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(widget), GTK_WRAP_WORD_CHAR);
+        gtk_widget_set_size_request(widget, sw, sh);
+
+        g_signal_connect(widget, "key-press-event",
+                         G_CALLBACK(on_form_widget_key_press), bw);
+    } else {
+        /* Use a GtkEntry for text inputs. */
+        widget = gtk_entry_new();
+        gtk_entry_set_text(GTK_ENTRY(widget), initial);
+        gtk_widget_set_size_request(widget, sw, sh);
+
+        /* Check for password type. */
+        const char *type = elem_get_attr(node, "type");
+        if (type && strcmp(type, "password") == 0)
+            gtk_entry_set_visibility(GTK_ENTRY(widget), FALSE);
+
+        /* Set placeholder if available. */
+        const char *placeholder = elem_get_attr(node, "placeholder");
+        if (placeholder)
+            gtk_entry_set_placeholder_text(GTK_ENTRY(widget), placeholder);
+
+        g_signal_connect(widget, "activate",
+                         G_CALLBACK(on_form_entry_activate), bw);
+        g_signal_connect(widget, "key-press-event",
+                         G_CALLBACK(on_form_widget_key_press), bw);
+    }
+
+    /* Style the widget to match page appearance. */
+    GtkCssProvider *css = gtk_css_provider_new();
+    gtk_css_provider_load_from_data(css,
+        "* { font-size: 13px; padding: 2px 4px; }", -1, NULL);
+    gtk_style_context_add_provider(
+        gtk_widget_get_style_context(widget),
+        GTK_STYLE_PROVIDER(css),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(css);
+
+    g_signal_connect(widget, "focus-out-event",
+                     G_CALLBACK(on_form_widget_focus_out), bw);
+
+    /* Position on the GtkFixed overlay. */
+    gtk_fixed_put(GTK_FIXED(bw->form_fixed), widget, sx, sy);
+    gtk_widget_show(widget);
+    gtk_widget_grab_focus(widget);
+
+    bw->active_form_widget = widget;
+    bw->active_form_node = node;
+}
+
+/* Handle button click — visual feedback and form submission. */
+static void handle_button_click(BrowserWindow *bw, const DomNode *node)
+{
+    BrowserTab *tab = active(bw);
+    if (!tab) return;
+
+    const char *type = NULL;
+    if (node->elem.tag == TAG_INPUT)
+        type = elem_get_attr(node, "type");
+    else if (node->elem.tag == TAG_BUTTON) {
+        type = elem_get_attr(node, "type");
+        if (!type) type = "submit"; /* default for <button> */
+    }
+
+    if (!type) return;
+
+    if (strcmp(type, "submit") == 0) {
+        /* Find parent form and submit. */
+        const DomNode *form = find_form_parent(node);
+        if (!form) {
+            gtk_label_set_text(GTK_LABEL(bw->status_bar),
+                               "Submit button: no parent form found");
+            return;
+        }
+
+        const char *action = elem_get_attr(form, "action");
+        const char *method = elem_get_attr(form, "method");
+        bool is_get = !method || strcasecmp(method, "get") == 0;
+
+        /* Collect form values. */
+        char query[4096] = {0};
+        size_t qlen = 0;
+
+        for (DomNode *n = dom_next_in_tree(form, form); n;
+             n = dom_next_in_tree(n, form)) {
+            if (n->type != PANE_NODE_ELEMENT) continue;
+            if (n->elem.tag != TAG_INPUT && n->elem.tag != TAG_TEXTAREA)
+                continue;
+
+            const char *name = elem_get_attr(n, "name");
+            if (!name || !name[0]) continue;
+
+            /* Skip non-submittable input types. */
+            if (n->elem.tag == TAG_INPUT) {
+                const char *itype = elem_get_attr(n, "type");
+                if (itype && (strcmp(itype, "submit") == 0 ||
+                              strcmp(itype, "button") == 0 ||
+                              strcmp(itype, "reset") == 0))
+                    continue;
+            }
+
+            const char *val = tab_get_form_value(tab, n);
+            if (!val) {
+                val = elem_get_attr(n, "value");
+                if (!val) val = "";
+            }
+
+            if (qlen > 0 && qlen < sizeof(query) - 1)
+                query[qlen++] = '&';
+
+            int written = snprintf(query + qlen, sizeof(query) - qlen,
+                                   "%s=%s", name, val);
+            if (written > 0) qlen += (size_t)written;
+        }
+
+        char final_url[4096];
+        if (action && action[0]) {
+            char resolved_action[2048];
+            resolve_url(tab->url, action, resolved_action,
+                        sizeof(resolved_action));
+            if (is_get && qlen > 0)
+                snprintf(final_url, sizeof(final_url), "%s?%s",
+                         resolved_action, query);
+            else
+                snprintf(final_url, sizeof(final_url), "%s", resolved_action);
+        } else {
+            if (is_get && qlen > 0)
+                snprintf(final_url, sizeof(final_url), "%s?%s", tab->url, query);
+            else
+                snprintf(final_url, sizeof(final_url), "%s", tab->url);
+        }
+
+        browser_navigate(bw, final_url);
+    } else if (strcmp(type, "reset") == 0) {
+        /* Clear all form values. */
+        tab_clear_form_values(tab);
+        gtk_label_set_text(GTK_LABEL(bw->status_bar), "Form reset");
+        /* Re-render to show cleared values. */
+        if (tab->has_content)
+            redraw_content(bw);
+    } else {
+        /* Generic button click — just show feedback. */
+        gtk_label_set_text(GTK_LABEL(bw->status_bar), "Button clicked");
+    }
+}
+
 /* Content area click handler. */
 static gboolean on_content_click(GtkWidget *widget, GdkEventButton *event,
                                   gpointer data)
@@ -913,7 +1369,30 @@ static gboolean on_content_click(GtkWidget *widget, GdkEventButton *event,
 
     const LayoutBox *hit = hit_test_box(tab->result.layout_tree->root,
                                          px, py, 0, 0);
-    if (!hit) return FALSE;
+    if (!hit) {
+        dismiss_form_widget(bw);
+        return FALSE;
+    }
+
+    /* Check if we hit a form element first (higher priority than links). */
+    const DomNode *form_node = find_form_element(hit);
+    if (form_node) {
+        if (is_text_input(form_node)) {
+            const LayoutBox *form_box = find_box_for_node(
+                tab->result.layout_tree->root, form_node);
+            if (form_box) {
+                spawn_form_widget(bw, form_node, form_box);
+                return TRUE;
+            }
+        } else if (is_button_element(form_node)) {
+            dismiss_form_widget(bw);
+            handle_button_click(bw, form_node);
+            return TRUE;
+        }
+    }
+
+    /* Dismiss any active form widget when clicking elsewhere. */
+    dismiss_form_widget(bw);
 
     /* Check if we hit a link. */
     const DomNode *link_node = find_link_ancestor(hit);
@@ -949,25 +1428,41 @@ static gboolean on_content_motion(GtkWidget *widget, GdkEventMotion *event,
     const LayoutBox *hit = hit_test_box(tab->result.layout_tree->root,
                                          px, py, 0, 0);
     GdkWindow *win = gtk_widget_get_window(widget);
-    if (hit && find_link_ancestor(hit)) {
-        GdkCursor *cursor = gdk_cursor_new_for_display(
-            gdk_window_get_display(win), GDK_HAND2);
-        gdk_window_set_cursor(win, cursor);
-        g_object_unref(cursor);
+    GdkCursorType cursor_type = GDK_LEFT_PTR;
+    const char *status_text = NULL;
 
-        /* Show link URL in status bar. */
-        const DomNode *link_node = find_link_ancestor(hit);
-        if (link_node) {
-            const char *href = elem_get_attr(link_node, "href");
-            if (href) {
-                char resolved[2048];
-                resolve_url(tab->url, href, resolved, sizeof(resolved));
-                gtk_label_set_text(GTK_LABEL(bw->status_bar), resolved);
+    if (hit) {
+        /* Check for form elements. */
+        const DomNode *form_node = find_form_element(hit);
+        if (form_node && is_text_input(form_node)) {
+            cursor_type = GDK_XTERM;
+        } else if (form_node && is_button_element(form_node)) {
+            cursor_type = GDK_HAND2;
+        } else if (find_link_ancestor(hit)) {
+            cursor_type = GDK_HAND2;
+            const DomNode *link_node = find_link_ancestor(hit);
+            if (link_node) {
+                const char *href = elem_get_attr(link_node, "href");
+                if (href) {
+                    static char resolved_buf[2048];
+                    resolve_url(tab->url, href, resolved_buf, sizeof(resolved_buf));
+                    status_text = resolved_buf;
+                }
             }
         }
+    }
+
+    if (cursor_type != GDK_LEFT_PTR) {
+        GdkCursor *cursor = gdk_cursor_new_for_display(
+            gdk_window_get_display(win), cursor_type);
+        gdk_window_set_cursor(win, cursor);
+        g_object_unref(cursor);
     } else {
         gdk_window_set_cursor(win, NULL);
     }
+
+    if (status_text)
+        gtk_label_set_text(GTK_LABEL(bw->status_bar), status_text);
 
     return FALSE;
 }
@@ -981,6 +1476,8 @@ static void on_scroll_changed(GtkAdjustment *adj, gpointer data)
     if (!tab) return;
 
     tab->scroll_y = (float)gtk_adjustment_get_value(adj);
+    /* Dismiss form widgets on scroll since they'd be mispositioned. */
+    dismiss_form_widget(bw);
     redraw_content(bw);
 }
 
@@ -1478,6 +1975,9 @@ BrowserWindow *browser_window_new(void)
 
     bw->content_scroll_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
+    /* Use GtkOverlay so we can position native form widgets over the page. */
+    bw->content_overlay = gtk_overlay_new();
+
     bw->content_area = gtk_drawing_area_new();
     gtk_widget_set_name(bw->content_area, "content-area");
     gtk_widget_set_can_focus(bw->content_area, TRUE);
@@ -1496,8 +1996,18 @@ BrowserWindow *browser_window_new(void)
     g_signal_connect(bw->content_area, "size-allocate",
                      G_CALLBACK(on_content_resize), bw);
 
+    /* Drawing area is the main child of the overlay. */
+    gtk_container_add(GTK_CONTAINER(bw->content_overlay), bw->content_area);
+
+    /* GtkFixed overlay for positioning form widgets. */
+    bw->form_fixed = gtk_fixed_new();
+    gtk_overlay_add_overlay(GTK_OVERLAY(bw->content_overlay), bw->form_fixed);
+    /* Make the fixed layer pass-through so drawing area gets events. */
+    gtk_overlay_set_overlay_pass_through(GTK_OVERLAY(bw->content_overlay),
+                                         bw->form_fixed, TRUE);
+
     gtk_box_pack_start(GTK_BOX(bw->content_scroll_box),
-                       bw->content_area, TRUE, TRUE, 0);
+                       bw->content_overlay, TRUE, TRUE, 0);
 
     /* Scrollbar. */
     bw->scroll_adj = gtk_adjustment_new(0, 0, 1000, 20, 200, 200);
