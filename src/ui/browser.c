@@ -722,11 +722,14 @@ void browser_navigate(BrowserWindow *bw, const char *url)
                 /* Copy back modified body if changed. */
                 if (fresp->body && fresp->body_len > 0 &&
                     fresp->body_len != resp->body_len) {
-                    free(resp->body);
-                    resp->body = malloc(fresp->body_len + 1);
-                    memcpy(resp->body, fresp->body, fresp->body_len);
-                    resp->body[fresp->body_len] = '\0';
-                    resp->body_len = fresp->body_len;
+                    char *new_body = malloc(fresp->body_len + 1);
+                    if (new_body) {
+                        free(resp->body);
+                        resp->body = new_body;
+                        memcpy(resp->body, fresp->body, fresp->body_len);
+                        resp->body[fresp->body_len] = '\0';
+                        resp->body_len = fresp->body_len;
+                    }
                 }
                 fetch_response_free(fresp);
             }

@@ -46,9 +46,16 @@ void fetch_request_set_header(FetchRequest *req,
 
     /* Add new header. */
     if (req->header_count < FETCH_MAX_HEADERS) {
-        req->header_names[req->header_count] = strdup(name);
-        req->header_values[req->header_count] = strdup(value);
-        req->header_count++;
+        char *n = strdup(name);
+        char *v = strdup(value);
+        if (n && v) {
+            req->header_names[req->header_count] = n;
+            req->header_values[req->header_count] = v;
+            req->header_count++;
+        } else {
+            free(n);
+            free(v);
+        }
     }
 }
 
@@ -90,9 +97,11 @@ FetchResponse *fetch_response_create(int status_code, const char *body,
     resp->status_code = status_code;
     if (body && body_len > 0) {
         resp->body = malloc(body_len + 1);
-        memcpy(resp->body, body, body_len);
-        resp->body[body_len] = '\0';
-        resp->body_len = body_len;
+        if (resp->body) {
+            memcpy(resp->body, body, body_len);
+            resp->body[body_len] = '\0';
+            resp->body_len = body_len;
+        }
     }
     if (url) resp->url = strdup(url);
     return resp;
@@ -123,9 +132,16 @@ void fetch_response_set_header(FetchResponse *resp,
         }
     }
     if (resp->header_count < FETCH_MAX_HEADERS) {
-        resp->header_names[resp->header_count] = strdup(name);
-        resp->header_values[resp->header_count] = strdup(value);
-        resp->header_count++;
+        char *n = strdup(name);
+        char *v = strdup(value);
+        if (n && v) {
+            resp->header_names[resp->header_count] = n;
+            resp->header_values[resp->header_count] = v;
+            resp->header_count++;
+        } else {
+            free(n);
+            free(v);
+        }
     }
 }
 
@@ -170,9 +186,16 @@ void plugin_context_set_custom_header(PluginContext *ctx,
         }
     }
     if (ctx->custom_header_count < FETCH_MAX_HEADERS) {
-        ctx->custom_header_names[ctx->custom_header_count] = strdup(name);
-        ctx->custom_header_values[ctx->custom_header_count] = strdup(value);
-        ctx->custom_header_count++;
+        char *n = strdup(name);
+        char *v = strdup(value);
+        if (n && v) {
+            ctx->custom_header_names[ctx->custom_header_count] = n;
+            ctx->custom_header_values[ctx->custom_header_count] = v;
+            ctx->custom_header_count++;
+        } else {
+            free(n);
+            free(v);
+        }
     }
 }
 
