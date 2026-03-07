@@ -22,6 +22,51 @@ static void update_scroll(BrowserWindow *bw);
 static BrowserTab *active(BrowserWindow *bw);
 static void update_plugin_button_style(GtkWidget *btn, bool enabled);
 
+/* ── UTF-8 validation ──────────────────────────────────────────────── */
+
+/* Sanitize a buffer in-place, replacing invalid UTF-8 bytes with '?'.
+ * Returns the same pointer for convenience. */
+static char *sanitize_utf8(char *buf, size_t len)
+{
+    if (!buf) return buf;
+    unsigned char *s = (unsigned char *)buf;
+    unsigned char *end = s + len;
+
+    while (s < end) {
+        if (*s < 0x80) {
+            s++;
+        } else if ((*s & 0xE0) == 0xC0) {
+            if (s + 1 >= end || (s[1] & 0xC0) != 0x80) { *s++ = '?'; continue; }
+            if (*s < 0xC2) { *s = '?'; s[1] = '?'; s += 2; continue; } /* overlong */
+            s += 2;
+        } else if ((*s & 0xF0) == 0xE0) {
+            if (s + 2 >= end || (s[1] & 0xC0) != 0x80 || (s[2] & 0xC0) != 0x80) {
+                *s++ = '?'; continue;
+            }
+            /* Reject overlong and surrogates. */
+            uint32_t cp = ((*s & 0x0F) << 12) | ((s[1] & 0x3F) << 6) | (s[2] & 0x3F);
+            if (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF)) {
+                *s = '?'; s[1] = '?'; s[2] = '?'; s += 3; continue;
+            }
+            s += 3;
+        } else if ((*s & 0xF8) == 0xF0) {
+            if (s + 3 >= end || (s[1] & 0xC0) != 0x80 ||
+                (s[2] & 0xC0) != 0x80 || (s[3] & 0xC0) != 0x80) {
+                *s++ = '?'; continue;
+            }
+            uint32_t cp = ((*s & 0x07) << 18) | ((s[1] & 0x3F) << 12) |
+                          ((s[2] & 0x3F) << 6) | (s[3] & 0x3F);
+            if (cp < 0x10000 || cp > 0x10FFFF) {
+                *s = '?'; s[1] = '?'; s[2] = '?'; s[3] = '?'; s += 4; continue;
+            }
+            s += 4;
+        } else {
+            *s++ = '?';
+        }
+    }
+    return buf;
+}
+
 /* ── Default pages ─────────────────────────────────────────────────── */
 
 static const char *HOME_PAGE =
@@ -496,8 +541,11 @@ void browser_navigate(BrowserWindow *bw, const char *url)
                 update_nav_buttons(bw);
                 return;
             }
-            /* Use possibly-modified URL from plugin. */
-            url = freq->url;
+            /* Use possibly-modified URL from plugin — copy to tab->url
+             * since freq will be freed before we need the URL again. */
+            strncpy(tab->url, freq->url, sizeof(tab->url) - 1);
+            tab->url[sizeof(tab->url) - 1] = '\0';
+            url = tab->url;
         }
 
         HttpResponse *resp = http_get(url, 5);
@@ -531,6 +579,8 @@ void browser_navigate(BrowserWindow *bw, const char *url)
             render_page(bw, err, strlen(err), "Error");
             gtk_label_set_text(GTK_LABEL(bw->status_bar), "Error");
         } else if (resp->body && resp->body_len > 0) {
+            /* Sanitize response body to valid UTF-8 for Pango/GTK. */
+            sanitize_utf8(resp->body, resp->body_len);
             tab_push_history(tab, url);
             render_page(bw, resp->body, resp->body_len, NULL);
 
@@ -547,7 +597,7 @@ void browser_navigate(BrowserWindow *bw, const char *url)
         }
 
         http_response_free(resp);
-        gtk_entry_set_text(GTK_ENTRY(bw->url_entry), url);
+        gtk_entry_set_text(GTK_ENTRY(bw->url_entry), tab->url);
         update_nav_buttons(bw);
         return;
     }
@@ -795,6 +845,131 @@ static gboolean on_draw(GtkWidget *widget, cairo_t *cr, gpointer data)
     }
 
     return TRUE;
+}
+
+/* ── Hit-testing for link clicks ───────────────────────────────────── */
+
+/* Find the deepest layout box containing the given point. */
+static const LayoutBox *hit_test_box(const LayoutBox *box,
+                                      float px, float py,
+                                      float ox, float oy)
+{
+    if (!box) return NULL;
+    if (box->style && box->style->display == DISPLAY_NONE) return NULL;
+
+    float x = ox + box->rect.x;
+    float y = oy + box->rect.y;
+
+    float bx = x - (box->padding.left + box->border.left);
+    float by = y - (box->padding.top + box->border.top);
+    float bw = box->border.left + box->padding.left + box->rect.width +
+               box->padding.right + box->border.right;
+    float bh = box->border.top + box->padding.top + box->rect.height +
+               box->padding.bottom + box->border.bottom;
+
+    /* Check children first (front-to-back, last child is on top). */
+    const LayoutBox *hit = NULL;
+    for (LayoutBox *child = box->first_child; child; child = child->next_sibling) {
+        const LayoutBox *h = hit_test_box(child, px, py, x, y);
+        if (h) hit = h;
+    }
+    if (hit) return hit;
+
+    /* Check if point is inside this box. */
+    if (px >= bx && px < bx + bw && py >= by && py < by + bh)
+        return box;
+
+    return NULL;
+}
+
+/* Walk up the DOM tree from a layout box to find an <a> ancestor. */
+static const DomNode *find_link_ancestor(const LayoutBox *box)
+{
+    while (box) {
+        if (box->node && box->node->type == PANE_NODE_ELEMENT &&
+            box->node->elem.tag == TAG_A) {
+            return box->node;
+        }
+        box = box->parent;
+    }
+    return NULL;
+}
+
+/* Content area click handler. */
+static gboolean on_content_click(GtkWidget *widget, GdkEventButton *event,
+                                  gpointer data)
+{
+    BrowserWindow *bw = data;
+    BrowserTab *tab = active(bw);
+    if (!tab || !tab->has_content) return FALSE;
+    if (event->button != 1) return FALSE; /* Left click only. */
+
+    if (!tab->result.layout_tree || !tab->result.layout_tree->root)
+        return FALSE;
+
+    /* Translate click to page coordinates (add scroll offset). */
+    float px = (float)event->x + tab->scroll_x;
+    float py = (float)event->y + tab->scroll_y;
+
+    const LayoutBox *hit = hit_test_box(tab->result.layout_tree->root,
+                                         px, py, 0, 0);
+    if (!hit) return FALSE;
+
+    /* Check if we hit a link. */
+    const DomNode *link_node = find_link_ancestor(hit);
+    if (link_node) {
+        const char *href = elem_get_attr(link_node, "href");
+        if (href && href[0]) {
+            char resolved[2048];
+            resolve_url(tab->url, href, resolved, sizeof(resolved));
+            if (resolved[0]) {
+                browser_navigate(bw, resolved);
+                return TRUE;
+            }
+        }
+    }
+
+    return FALSE;
+}
+
+/* Content area mouse motion handler — change cursor over links. */
+static gboolean on_content_motion(GtkWidget *widget, GdkEventMotion *event,
+                                   gpointer data)
+{
+    BrowserWindow *bw = data;
+    BrowserTab *tab = active(bw);
+    if (!tab || !tab->has_content) return FALSE;
+
+    if (!tab->result.layout_tree || !tab->result.layout_tree->root)
+        return FALSE;
+
+    float px = (float)event->x + tab->scroll_x;
+    float py = (float)event->y + tab->scroll_y;
+
+    const LayoutBox *hit = hit_test_box(tab->result.layout_tree->root,
+                                         px, py, 0, 0);
+    GdkWindow *win = gtk_widget_get_window(widget);
+    if (hit && find_link_ancestor(hit)) {
+        GdkCursor *cursor = gdk_cursor_new_for_display(
+            gdk_window_get_display(win), GDK_HAND2);
+        gdk_window_set_cursor(win, cursor);
+        g_object_unref(cursor);
+
+        /* Show link URL in status bar. */
+        const DomNode *link_node = find_link_ancestor(hit);
+        if (link_node) {
+            const char *href = elem_get_attr(link_node, "href");
+            if (href) {
+                char resolved[2048];
+                resolve_url(tab->url, href, resolved, sizeof(resolved));
+                gtk_label_set_text(GTK_LABEL(bw->status_bar), resolved);
+            }
+        }
+    } else {
+        gdk_window_set_cursor(win, NULL);
+    }
+
+    return FALSE;
 }
 
 /* ── Scrollbar callback ────────────────────────────────────────────── */
@@ -1314,6 +1489,10 @@ BrowserWindow *browser_window_new(void)
     g_signal_connect(bw->content_area, "draw", G_CALLBACK(on_draw), bw);
     g_signal_connect(bw->content_area, "scroll-event",
                      G_CALLBACK(on_scroll_event), bw);
+    g_signal_connect(bw->content_area, "button-press-event",
+                     G_CALLBACK(on_content_click), bw);
+    g_signal_connect(bw->content_area, "motion-notify-event",
+                     G_CALLBACK(on_content_motion), bw);
     g_signal_connect(bw->content_area, "size-allocate",
                      G_CALLBACK(on_content_resize), bw);
 
