@@ -622,7 +622,7 @@ void layout_flex(LayoutBox *box, float containing_width, float containing_height
             flex_apply_relative(c, content_w, content_h);
 
             if (is_reverse) {
-                main_pos -= child_outer_main + (item_idx > 0 ? 0 : 0) + item_gap;
+                main_pos -= child_outer_main + item_gap;
             } else {
                 main_pos += child_outer_main + item_gap;
             }

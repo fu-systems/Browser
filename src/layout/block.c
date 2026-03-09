@@ -128,15 +128,21 @@ void layout_block(LayoutBox *box, float containing_width, float containing_heigh
     /* Resolve width. */
     box->rect.width = resolve_width(box, containing_width);
 
-    /* Lay out children. */
-    layout_children(box, arena);
-
-    /* Resolve height. */
+    /* Pre-resolve specified height so children can use it for percentage
+     * calculations (e.g., absolutely positioned children with top/bottom %). */
     float specified_h = resolve_height(box, containing_height);
     if (specified_h >= 0) {
         box->rect.height = specified_h;
     }
-    /* Otherwise height was set by layout_children. */
+
+    /* Lay out children. */
+    layout_children(box, arena);
+
+    /* For specified height, re-apply in case layout_children changed it.
+     * For auto height, layout_children has already set box->rect.height. */
+    if (specified_h >= 0) {
+        box->rect.height = specified_h;
+    }
 
     /* Apply min/max constraints. */
     ComputedStyle *s = box->style;

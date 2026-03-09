@@ -345,11 +345,10 @@ static const EdgeCaseRecord catalog[] = {
         .test_case = "<div style=\"display:flex;flex-wrap:wrap;width:300px\">"
                      "<div style=\"width:200px\"></div>"
                      "<div style=\"width:200px\"></div></div>",
-        .resolved = false,
-        .resolution_note = "flex.c tracks flex_wrap in style but doesn't implement "
-                           "multi-line layout. Needs: (1) detect when items exceed "
-                           "main size, (2) break into flex lines, (3) distribute cross "
-                           "space between lines.",
+        .resolved = true,
+        .resolution_note = "Implemented in flex.c: wrap detection at line 285, "
+                           "multi-line splitting at lines 322-373, cross-space "
+                           "distribution in the line layout loop.",
     },
 };
 

@@ -135,7 +135,7 @@ static int paint_cmd_cmp(const void *a, const void *b)
 {
     const PaintCmd *ca = a;
     const PaintCmd *cb = b;
-    return ca->z_order - cb->z_order;
+    return (ca->z_order > cb->z_order) - (ca->z_order < cb->z_order);
 }
 
 /* ── Public API ────────────────────────────────────────────────────── */

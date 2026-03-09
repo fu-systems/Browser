@@ -696,6 +696,19 @@ void layout_grid(LayoutBox *box, float containing_width, float containing_height
         row_pos[r] = row_pos[r - 1] + row_sizes[r - 1] + row_gap;
     }
 
+    /* ── Compute container height early for relative offset resolution ── */
+
+    float container_h;
+    if (specified_h >= 0) {
+        container_h = specified_h;
+    } else {
+        container_h = 0;
+        for (int r = 0; r < num_rows; r++) {
+            container_h += row_sizes[r];
+        }
+        container_h += (num_rows > 1) ? row_gap * (float)(num_rows - 1) : 0;
+    }
+
     /* ── Position items ───────────────────────────────────────────── */
 
     GridAlign ji = parse_grid_align(&s->justify_items);
@@ -791,21 +804,12 @@ void layout_grid(LayoutBox *box, float containing_width, float containing_height
 
         c->rect.x = cell_x + x_offset + c->margin.left + c->border.left + c->padding.left;
         c->rect.y = cell_y + y_offset + c->margin.top + c->border.top + c->padding.top;
-        grid_apply_relative(c, content_w, box->rect.height);
+        grid_apply_relative(c, content_w, container_h);
     }
 
     /* ── Set container height ─────────────────────────────────────── */
 
-    if (specified_h >= 0) {
-        box->rect.height = specified_h;
-    } else {
-        float total_h = 0;
-        for (int r = 0; r < num_rows; r++) {
-            total_h += row_sizes[r];
-        }
-        total_h += (num_rows > 1) ? row_gap * (float)(num_rows - 1) : 0;
-        box->rect.height = total_h;
-    }
+    box->rect.height = container_h;
 
     /* ── Apply min/max constraints ────────────────────────────────── */
 
