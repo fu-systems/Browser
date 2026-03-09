@@ -30,8 +30,12 @@
     if ((v)->len + (n) > (v)->cap) {                                    \
         size_t _new_cap = (v)->cap ? (v)->cap * 2 : 8;                 \
         while (_new_cap < (v)->len + (n)) _new_cap *= 2;               \
-        (v)->data = realloc((v)->data, _new_cap * sizeof(*(v)->data));  \
-        (v)->cap = _new_cap;                                            \
+        void *_new_data = realloc((v)->data,                            \
+                                  _new_cap * sizeof(*(v)->data));       \
+        if (_new_data) {                                                \
+            (v)->data = _new_data;                                      \
+            (v)->cap = _new_cap;                                        \
+        }                                                               \
     }                                                                    \
 } while(0)
 

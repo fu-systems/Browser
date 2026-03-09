@@ -83,6 +83,7 @@ static void strintern_grow(StrIntern *si)
 {
     size_t new_cap = si->capacity * 2;
     char **new_buckets = calloc(new_cap, sizeof(char *));
+    if (!new_buckets) return; /* OOM: keep existing table */
 
     for (size_t i = 0; i < si->capacity; i++) {
         char *entry = si->buckets[i];

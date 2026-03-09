@@ -35,6 +35,7 @@ static void map_grow(Map *m)
 {
     size_t new_cap = m->capacity ? m->capacity * 2 : MAP_INITIAL_CAP;
     MapEntry *new_entries = calloc(new_cap, sizeof(MapEntry));
+    if (!new_entries) return; /* OOM: keep existing table */
 
     for (size_t i = 0; i < m->capacity; i++) {
         MapEntry *e = &m->entries[i];
