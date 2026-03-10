@@ -123,6 +123,7 @@ if(WIN32)
     # Win32 browser
     add_executable(pane WIN32
         src/ui/win32_browser.c
+        src/ui/browser_common.c
         src/ui/main_win32.c
     )
     target_include_directories(pane PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -176,6 +177,7 @@ else()
     # GTK3 browser
     add_executable(pane
         src/ui/browser.c
+        src/ui/browser_common.c
         src/ui/main_gui.c
     )
     target_include_directories(pane PRIVATE

@@ -3,6 +3,17 @@
  *
  * Native Windows browser chrome using Win32 API.
  * Uses GDI for 2D rendering with FreeType for text.
+ *
+ * Features synced with GTK3/Linux build:
+ *   - External CSS fetching for <link> stylesheets
+ *   - Link clicking with hit-testing
+ *   - URL resolution (relative/absolute)
+ *   - History stack with back/forward
+ *   - Mouse hover cursor changes
+ *   - Form element detection and submission
+ *   - Keyboard shortcuts (Ctrl+L, Ctrl+R, Alt+arrows, etc.)
+ *   - Status bar
+ *   - UTF-8 sanitization
  */
 
 #ifdef _WIN32
@@ -22,6 +33,7 @@
 #include <stdlib.h>
 
 #include "win32_browser.h"
+#include "browser_common.h"
 #include "../pane.h"
 #include "../font/font.h"
 #include "../net/http.h"
@@ -29,6 +41,7 @@
 #include "../layout/box.h"
 #include "../layout/inline.h"
 #include "../html/tree_builder.h"
+#include "../dom/dom.h"
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "gdi32.lib")
@@ -46,6 +59,7 @@
 #define TOOLBAR_HEIGHT 36
 #define STATUSBAR_HEIGHT 22
 #define MAX_URL 2048
+#define MAX_HISTORY 64
 
 /* ── State ─────────────────────────────────────────────────────────── */
 
@@ -57,7 +71,7 @@ static struct {
     HWND     reload_btn;
     HWND     home_btn;
     HWND     go_btn;
-    HWND     statusbar;
+    HWND     status_label;
 
     PaneResult result;
     int        has_content;
@@ -69,7 +83,25 @@ static struct {
 
     char     current_url[MAX_URL];
     PaneFont *font_regular;
+
+    /* History stack. */
+    char    *history[MAX_HISTORY];
+    int      history_count;
+    int      history_pos;   /* -1 = no history */
+
+    /* Cursor tracking. */
+    HCURSOR  cursor_arrow;
+    HCURSOR  cursor_hand;
+    HCURSOR  cursor_ibeam;
+    HCURSOR  current_cursor;
 } g;
+
+/* ── Forward declarations ──────────────────────────────────────────── */
+
+static void navigate_impl(const char *url, int push_history);
+static void navigate(const char *url);
+static void update_nav_buttons(void);
+static void set_status(const char *text);
 
 /* ── GDI text measurement callback ─────────────────────────────────── */
 
@@ -187,6 +219,56 @@ static const char *HOME_HTML =
     "  <div class=\"footer\">Pane v0.1.0 — Phase 2 C Rendering Engine</div>\n"
     "</body></html>\n";
 
+/* ── History management ────────────────────────────────────────────── */
+
+static void push_history(const char *url)
+{
+    /* Truncate forward history. */
+    for (int i = g.history_pos + 1; i < g.history_count; i++) {
+        free(g.history[i]);
+        g.history[i] = NULL;
+    }
+    g.history_count = g.history_pos + 1;
+
+    if (g.history_count >= MAX_HISTORY) {
+        /* Shift out oldest. */
+        free(g.history[0]);
+        memmove(g.history, g.history + 1,
+                (MAX_HISTORY - 1) * sizeof(char *));
+        g.history_count = MAX_HISTORY - 1;
+    }
+
+    g.history[g.history_count] = _strdup(url);
+    g.history_pos = g.history_count;
+    g.history_count++;
+}
+
+static void free_history(void)
+{
+    for (int i = 0; i < g.history_count; i++) {
+        free(g.history[i]);
+        g.history[i] = NULL;
+    }
+    g.history_count = 0;
+    g.history_pos = -1;
+}
+
+/* ── Status bar helper ─────────────────────────────────────────────── */
+
+static void set_status(const char *text)
+{
+    if (g.status_label)
+        SetWindowTextA(g.status_label, text ? text : "");
+}
+
+/* ── Navigation button state ───────────────────────────────────────── */
+
+static void update_nav_buttons(void)
+{
+    EnableWindow(g.back_btn, g.history_pos > 0);
+    EnableWindow(g.fwd_btn, g.history_pos < g.history_count - 1);
+}
+
 /* ── Load page ─────────────────────────────────────────────────────── */
 
 static void load_page(const char *html, size_t len)
@@ -196,7 +278,16 @@ static void load_page(const char *html, size_t len)
         g.has_content = 0;
     }
 
-    g.result = pane_render(html, len, NULL, 0, g.viewport_w, g.viewport_h);
+    /* Fetch external CSS from <link> tags (matches Linux behavior). */
+    size_t ext_css_len = 0;
+    char *ext_css = NULL;
+    if (g.current_url[0] && strncmp(g.current_url, "http", 4) == 0) {
+        ext_css = fetch_external_css(html, len, g.current_url, &ext_css_len);
+    }
+
+    g.result = pane_render(html, len, ext_css, ext_css_len,
+                            g.viewport_w, g.viewport_h);
+    free(ext_css);
     g.has_content = 1;
     g.scroll_y = 0;
 
@@ -243,18 +334,28 @@ static void show_error(const char *url, const char *detail)
     load_page(err, strlen(err));
 }
 
-static void navigate(const char *url)
+/* ── Navigation ────────────────────────────────────────────────────── */
+
+static void navigate_impl(const char *url, int push_hist)
 {
     strncpy(g.current_url, url, MAX_URL - 1);
+    g.current_url[MAX_URL - 1] = '\0';
 
     if (strcmp(url, "about:home") == 0 || url[0] == '\0') {
+        if (push_hist) push_history(url);
         load_page(HOME_HTML, strlen(HOME_HTML));
+        SetWindowTextA(g.url_entry, url);
+        update_nav_buttons();
+        set_status("Ready");
         return;
     }
 
     /* Inline HTML. */
     if (url[0] == '<') {
+        if (push_hist) push_history("about:html");
         load_page(url, strlen(url));
+        SetWindowTextA(g.url_entry, "about:html");
+        update_nav_buttons();
         return;
     }
 
@@ -268,6 +369,7 @@ static void navigate(const char *url)
         FILE *f = fopen(path, "rb");
         if (!f) {
             show_error(url, "File not found.");
+            update_nav_buttons();
             return;
         }
 
@@ -278,26 +380,45 @@ static void navigate(const char *url)
         if (buf) {
             fread(buf, 1, sz, f);
             buf[sz] = '\0';
+            if (push_hist) push_history(url);
             load_page(buf, sz);
             free(buf);
         }
         fclose(f);
+        SetWindowTextA(g.url_entry, url);
+        update_nav_buttons();
         return;
     }
 
     /* HTTP / HTTPS URLs. */
     if (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0) {
+        set_status("Loading...");
+
         HttpResponse *resp = http_get(url, 5);
 
         if (resp->error) {
             show_error(url, resp->error);
+            if (push_hist) push_history(url);
+            set_status("Error");
         } else if (resp->body && resp->body_len > 0) {
+            /* Sanitize UTF-8 before rendering (matches Linux behavior). */
+            sanitize_utf8(resp->body, resp->body_len);
+            if (push_hist) push_history(url);
             load_page(resp->body, resp->body_len);
+
+            char status_msg[256];
+            snprintf(status_msg, sizeof(status_msg),
+                     "HTTP %d — %zu bytes", resp->status_code, resp->body_len);
+            set_status(status_msg);
         } else {
             show_error(url, "Empty response.");
+            if (push_hist) push_history(url);
+            set_status("Empty response");
         }
 
         http_response_free(resp);
+        SetWindowTextA(g.url_entry, g.current_url);
+        update_nav_buttons();
         return;
     }
 
@@ -305,11 +426,83 @@ static void navigate(const char *url)
     if (strchr(url, '.') && url[0] != '<' && url[0] != '/') {
         char full_url[2048];
         snprintf(full_url, sizeof(full_url), "https://%s", url);
-        navigate(full_url);
+        navigate_impl(full_url, push_hist);
         return;
     }
 
     show_error(url, "Unsupported URL scheme.");
+    SetWindowTextA(g.url_entry, url);
+    update_nav_buttons();
+}
+
+static void navigate(const char *url)
+{
+    navigate_impl(url, 1);
+}
+
+/* ── Form submission helper ────────────────────────────────────────── */
+
+static void handle_form_submit(const DomNode *form_node)
+{
+    if (!form_node) return;
+
+    const char *action = elem_get_attr(form_node, "action");
+    const char *method = elem_get_attr(form_node, "method");
+    int is_get = !method || _stricmp(method, "get") == 0;
+
+    /* Build query string from form fields. */
+    char query[4096] = {0};
+    size_t qlen = 0;
+
+    for (DomNode *n = dom_next_in_tree(form_node, form_node); n;
+         n = dom_next_in_tree(n, form_node)) {
+        if (n->type != PANE_NODE_ELEMENT) continue;
+        if (n->elem.tag != TAG_INPUT && n->elem.tag != TAG_TEXTAREA)
+            continue;
+
+        const char *name = elem_get_attr(n, "name");
+        if (!name || !name[0]) continue;
+
+        /* Skip non-submittable input types. */
+        if (n->elem.tag == TAG_INPUT) {
+            const char *itype = elem_get_attr(n, "type");
+            if (itype && (strcmp(itype, "submit") == 0 ||
+                          strcmp(itype, "button") == 0 ||
+                          strcmp(itype, "reset") == 0))
+                continue;
+        }
+
+        const char *val = elem_get_attr(n, "value");
+        if (!val) val = "";
+
+        if (qlen > 0 && qlen < sizeof(query) - 1)
+            query[qlen++] = '&';
+
+        int written = snprintf(query + qlen, sizeof(query) - qlen,
+                               "%s=%s", name, val);
+        if (written > 0) qlen += (size_t)written;
+    }
+
+    /* Build final URL. */
+    char final_url[4096];
+    if (action && action[0]) {
+        char resolved_action[2048];
+        resolve_url(g.current_url, action, resolved_action,
+                    sizeof(resolved_action));
+        if (is_get && qlen > 0)
+            snprintf(final_url, sizeof(final_url), "%s?%s",
+                     resolved_action, query);
+        else
+            snprintf(final_url, sizeof(final_url), "%s", resolved_action);
+    } else {
+        if (is_get && qlen > 0)
+            snprintf(final_url, sizeof(final_url), "%s?%s",
+                     g.current_url, query);
+        else
+            snprintf(final_url, sizeof(final_url), "%s", g.current_url);
+    }
+
+    navigate(final_url);
 }
 
 /* ── Render layout box via GDI ─────────────────────────────────────── */
@@ -396,6 +589,118 @@ static void paint_box_gdi(HDC hdc, const LayoutBox *box, float ox, float oy)
     }
 }
 
+/* ── Content area click handler ────────────────────────────────────── */
+
+static void handle_content_click(int mx, int my)
+{
+    if (!g.has_content || !g.result.layout_tree || !g.result.layout_tree->root)
+        return;
+
+    /* Convert window coordinates to page coordinates. */
+    float px = (float)mx;
+    float py = (float)(my - TOOLBAR_HEIGHT) + g.scroll_y;
+
+    const LayoutBox *hit = hit_test_box(g.result.layout_tree->root,
+                                         px, py, 0, 0);
+    if (!hit) return;
+
+    /* Check for form elements first (higher priority than links). */
+    const DomNode *form_node = find_form_element(hit);
+    if (form_node) {
+        if (is_button_element(form_node)) {
+            /* Handle button/submit click. */
+            const char *type = NULL;
+            if (form_node->elem.tag == TAG_INPUT)
+                type = elem_get_attr(form_node, "type");
+            else if (form_node->elem.tag == TAG_BUTTON) {
+                type = elem_get_attr(form_node, "type");
+                if (!type) type = "submit";
+            }
+
+            if (type && strcmp(type, "submit") == 0) {
+                const DomNode *form = find_form_parent(form_node);
+                if (form) {
+                    handle_form_submit(form);
+                } else {
+                    set_status("Submit button: no parent form found");
+                }
+            } else {
+                set_status("Button clicked");
+            }
+            return;
+        }
+        if (is_text_input(form_node)) {
+            set_status("Text input clicked (editing not yet supported)");
+            return;
+        }
+    }
+
+    /* Check for link. */
+    const DomNode *link_node = find_link_ancestor(hit);
+    if (link_node) {
+        const char *href = elem_get_attr(link_node, "href");
+        if (href && href[0]) {
+            char resolved[2048];
+            resolve_url(g.current_url, href, resolved, sizeof(resolved));
+            if (resolved[0]) {
+                SetWindowTextA(g.url_entry, resolved);
+                navigate(resolved);
+            }
+        }
+    }
+}
+
+/* ── Mouse hover handler ───────────────────────────────────────────── */
+
+static void handle_content_mousemove(int mx, int my)
+{
+    if (my < TOOLBAR_HEIGHT) {
+        g.current_cursor = g.cursor_arrow;
+        return;
+    }
+
+    if (!g.has_content || !g.result.layout_tree || !g.result.layout_tree->root) {
+        g.current_cursor = g.cursor_arrow;
+        return;
+    }
+
+    float px = (float)mx;
+    float py = (float)(my - TOOLBAR_HEIGHT) + g.scroll_y;
+
+    const LayoutBox *hit = hit_test_box(g.result.layout_tree->root,
+                                         px, py, 0, 0);
+    if (hit) {
+        /* Check form elements. */
+        const DomNode *form_node = find_form_element(hit);
+        if (form_node && is_text_input(form_node)) {
+            g.current_cursor = g.cursor_ibeam;
+            set_status("");
+            return;
+        }
+        if (form_node && is_button_element(form_node)) {
+            g.current_cursor = g.cursor_hand;
+            set_status("");
+            return;
+        }
+
+        /* Check links. */
+        const DomNode *link_node = find_link_ancestor(hit);
+        if (link_node) {
+            g.current_cursor = g.cursor_hand;
+            const char *href = elem_get_attr(link_node, "href");
+            if (href) {
+                char resolved[2048];
+                resolve_url(g.current_url, href, resolved, sizeof(resolved));
+                set_status(resolved);
+            }
+            return;
+        }
+    }
+
+    g.current_cursor = g.cursor_arrow;
+    set_status("");
+}
+
 /* ── Window procedure ──────────────────────────────────────────────── */
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -426,6 +731,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         g.go_btn = CreateWindowA("BUTTON", "Go", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
             rc.right - 60, 4, 52, 28, hwnd, (HMENU)IDC_GO_BTN, hInst, NULL);
 
+        /* Status bar at the bottom. */
+        g.status_label = CreateWindowA("STATIC", "Ready",
+            WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX,
+            4, rc.bottom - STATUSBAR_HEIGHT + 2, rc.right - 8, STATUSBAR_HEIGHT - 4,
+            hwnd, NULL, hInst, NULL);
+
         /* Set font for controls. */
         HFONT ui_font = CreateFontA(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
@@ -437,6 +748,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         SendMessage(g.home_btn, WM_SETFONT, (WPARAM)ui_font, TRUE);
         SendMessage(g.go_btn, WM_SETFONT, (WPARAM)ui_font, TRUE);
 
+        HFONT status_font = CreateFontA(-11, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, "Segoe UI");
+        SendMessage(g.status_label, WM_SETFONT, (WPARAM)status_font, TRUE);
+
+        /* Initialize button states. */
+        update_nav_buttons();
+
         /* Load home page. */
         navigate("about:home");
         return 0;
@@ -446,7 +765,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         int w = LOWORD(lParam);
         int h = HIWORD(lParam);
         float new_w = (float)w;
-        float new_h = (float)(h - TOOLBAR_HEIGHT);
+        float new_h = (float)(h - TOOLBAR_HEIGHT - STATUSBAR_HEIGHT);
 
         int size_changed = (new_w != g.viewport_w || new_h != g.viewport_h);
         g.viewport_w = new_w;
@@ -457,9 +776,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         MoveWindow(g.url_entry, 144, 6, url_w > 100 ? url_w : 100, 24, TRUE);
         MoveWindow(g.go_btn, w - 60, 4, 52, 28, TRUE);
 
+        /* Resize status bar. */
+        MoveWindow(g.status_label, 4, h - STATUSBAR_HEIGHT + 2,
+                   w - 8, STATUSBAR_HEIGHT - 4, TRUE);
+
         /* Re-layout page at new viewport dimensions. */
         if (size_changed && g.has_content) {
-            navigate(g.current_url);
+            navigate_impl(g.current_url, 0);
         } else {
             InvalidateRect(hwnd, NULL, TRUE);
         }
@@ -479,8 +802,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         FillRect(hdc, &toolbar_rc, toolbar_brush);
         DeleteObject(toolbar_brush);
 
+        /* Status bar background. */
+        HBRUSH status_brush = CreateSolidBrush(RGB(240, 240, 240));
+        RECT status_rc = { 0, rc.bottom - STATUSBAR_HEIGHT, rc.right, rc.bottom };
+        FillRect(hdc, &status_rc, status_brush);
+        DeleteObject(status_brush);
+
         /* Content area. */
-        RECT content_rc = { 0, TOOLBAR_HEIGHT, rc.right, rc.bottom };
+        RECT content_rc = { 0, TOOLBAR_HEIGHT, rc.right, rc.bottom - STATUSBAR_HEIGHT };
         HBRUSH white = CreateSolidBrush(RGB(255, 255, 255));
         FillRect(hdc, &content_rc, white);
         DeleteObject(white);
@@ -488,7 +817,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         /* Render page. */
         if (g.has_content && g.result.layout_tree && g.result.layout_tree->root) {
             /* Clip to content area. */
-            HRGN clip = CreateRectRgn(0, TOOLBAR_HEIGHT, rc.right, rc.bottom);
+            HRGN clip = CreateRectRgn(0, TOOLBAR_HEIGHT, rc.right,
+                                       rc.bottom - STATUSBAR_HEIGHT);
             SelectClipRgn(hdc, clip);
 
             /* Offset for toolbar. */
@@ -505,6 +835,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         HPEN old_pen = (HPEN)SelectObject(hdc, sep_pen);
         MoveToEx(hdc, 0, TOOLBAR_HEIGHT, NULL);
         LineTo(hdc, rc.right, TOOLBAR_HEIGHT);
+        /* Status bar separator. */
+        MoveToEx(hdc, 0, rc.bottom - STATUSBAR_HEIGHT, NULL);
+        LineTo(hdc, rc.right, rc.bottom - STATUSBAR_HEIGHT);
         SelectObject(hdc, old_pen);
         DeleteObject(sep_pen);
 
@@ -523,11 +856,83 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         return 0;
     }
 
+    case WM_LBUTTONDOWN: {
+        int mx = GET_X_LPARAM(lParam);
+        int my = GET_Y_LPARAM(lParam);
+
+        /* Only handle clicks in content area (below toolbar, above status). */
+        if (my >= TOOLBAR_HEIGHT) {
+            handle_content_click(mx, my);
+        }
+        return 0;
+    }
+
+    case WM_MOUSEMOVE: {
+        int mx = GET_X_LPARAM(lParam);
+        int my = GET_Y_LPARAM(lParam);
+        handle_content_mousemove(mx, my);
+        SetCursor(g.current_cursor);
+        return 0;
+    }
+
+    case WM_SETCURSOR: {
+        if (LOWORD(lParam) == HTCLIENT) {
+            SetCursor(g.current_cursor ? g.current_cursor : g.cursor_arrow);
+            return TRUE;
+        }
+        break;
+    }
+
     case WM_KEYDOWN: {
-        if (wParam == VK_F5) {
-            navigate(g.current_url);
+        int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        int alt  = (GetKeyState(VK_MENU)    & 0x8000) != 0;
+
+        /* Ctrl+L: Focus URL bar. */
+        if (ctrl && wParam == 'L') {
+            SetFocus(g.url_entry);
+            SendMessage(g.url_entry, EM_SETSEL, 0, -1);
             return 0;
         }
+
+        /* Ctrl+R / F5: Reload. */
+        if ((ctrl && wParam == 'R') || wParam == VK_F5) {
+            navigate_impl(g.current_url, 0);
+            return 0;
+        }
+
+        /* Alt+Left: Back. */
+        if (alt && wParam == VK_LEFT) {
+            if (g.history_pos > 0) {
+                g.history_pos--;
+                navigate_impl(g.history[g.history_pos], 0);
+                SetWindowTextA(g.url_entry, g.current_url);
+                update_nav_buttons();
+            }
+            return 0;
+        }
+
+        /* Alt+Right: Forward. */
+        if (alt && wParam == VK_RIGHT) {
+            if (g.history_pos < g.history_count - 1) {
+                g.history_pos++;
+                navigate_impl(g.history[g.history_pos], 0);
+                SetWindowTextA(g.url_entry, g.current_url);
+                update_nav_buttons();
+            }
+            return 0;
+        }
+
+        /* Backspace: Back (when not in URL bar). */
+        if (wParam == VK_BACK && GetFocus() != g.url_entry) {
+            if (g.history_pos > 0) {
+                g.history_pos--;
+                navigate_impl(g.history[g.history_pos], 0);
+                SetWindowTextA(g.url_entry, g.current_url);
+                update_nav_buttons();
+            }
+            return 0;
+        }
+
         if (wParam == VK_RETURN && GetFocus() == g.url_entry) {
             char url[MAX_URL];
             GetWindowTextA(g.url_entry, url, MAX_URL);
@@ -535,7 +940,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             SetFocus(hwnd);
             return 0;
         }
-        /* Scroll keys. */
+
+        /* Scroll keys (when not in URL bar). */
         if (GetFocus() != g.url_entry) {
             float page = g.viewport_h * 0.8f;
             float max_s = g.content_height - g.viewport_h;
@@ -558,9 +964,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
     case WM_COMMAND: {
         int id = LOWORD(wParam);
-        int code = HIWORD(wParam);
 
-        if (id == IDC_GO_BTN || (id == IDC_URL_ENTRY && code == EN_KILLFOCUS + 1)) {
+        if (id == IDC_GO_BTN) {
             char url[MAX_URL];
             GetWindowTextA(g.url_entry, url, MAX_URL);
             navigate(url);
@@ -571,13 +976,30 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             navigate("about:home");
         }
         if (id == IDC_RELOAD_BTN) {
-            navigate(g.current_url);
+            navigate_impl(g.current_url, 0);
+        }
+        if (id == IDC_BACK_BTN) {
+            if (g.history_pos > 0) {
+                g.history_pos--;
+                navigate_impl(g.history[g.history_pos], 0);
+                SetWindowTextA(g.url_entry, g.current_url);
+                update_nav_buttons();
+            }
+        }
+        if (id == IDC_FWD_BTN) {
+            if (g.history_pos < g.history_count - 1) {
+                g.history_pos++;
+                navigate_impl(g.history[g.history_pos], 0);
+                SetWindowTextA(g.url_entry, g.current_url);
+                update_nav_buttons();
+            }
         }
         return 0;
     }
 
     case WM_DESTROY:
         if (g.has_content) pane_result_free(&g.result);
+        free_history();
         PostQuitMessage(0);
         return 0;
     }
@@ -594,6 +1016,13 @@ int win32_browser_run(int argc, char **argv)
     memset(&g, 0, sizeof(g));
     g.viewport_w = 1024;
     g.viewport_h = 700;
+    g.history_pos = -1;
+
+    /* Load cursors. */
+    g.cursor_arrow = LoadCursor(NULL, IDC_ARROW);
+    g.cursor_hand  = LoadCursor(NULL, IDC_HAND);
+    g.cursor_ibeam = LoadCursor(NULL, IDC_IBEAM);
+    g.current_cursor = g.cursor_arrow;
 
     /* Register GDI text measurement so layout gets accurate widths. */
     layout_set_measure_fn(win32_measure_text_cb);
@@ -603,7 +1032,7 @@ int win32_browser_run(int argc, char **argv)
     wc.cbSize        = sizeof(wc);
     wc.lpfnWndProc   = WndProc;
     wc.hInstance     = hInst;
-    wc.hCursor       = LoadCursor(NULL, IDC_ARROW);
+    wc.hCursor       = NULL;  /* We handle cursor in WM_SETCURSOR */
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     wc.lpszClassName = L"PaneBrowser";
     wc.hIcon         = LoadIcon(NULL, IDI_APPLICATION);
