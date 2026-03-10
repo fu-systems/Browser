@@ -310,7 +310,7 @@ static void paint_box_gdi(HDC hdc, const LayoutBox *box, float ox, float oy)
 
     /* Children. */
     for (LayoutBox *child = box->first_child; child; child = child->next_sibling) {
-        paint_box_gdi(hdc, child, x, oy);
+        paint_box_gdi(hdc, child, x, oy + box->rect.y);
     }
 }
 
