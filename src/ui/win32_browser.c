@@ -27,6 +27,7 @@
 #include "../net/http.h"
 #include "../style/computed.h"
 #include "../layout/box.h"
+#include "../layout/inline.h"
 #include "../html/tree_builder.h"
 
 #pragma comment(lib, "comctl32.lib")
@@ -70,6 +71,63 @@ static struct {
     PaneFont *font_regular;
 } g;
 
+/* ── GDI text measurement callback ─────────────────────────────────── */
+
+static HFONT create_gdi_font(float font_size, bool bold, const char *family)
+{
+    int font_height = -(int)(font_size * 96.0f / 72.0f);
+    int weight = bold ? FW_BOLD : FW_NORMAL;
+
+    return CreateFontA(
+        font_height, 0, 0, 0, weight,
+        FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS,
+        family ? family : "Segoe UI");
+}
+
+static float win32_measure_text_cb(const char *text, size_t len,
+                                    float font_size, bool bold,
+                                    bool monospace)
+{
+    if (!text || len == 0) return 0;
+
+    const char *family = monospace ? "Courier New" : "Segoe UI";
+    HFONT hfont = create_gdi_font(font_size, bold, family);
+
+    HDC hdc = CreateCompatibleDC(NULL);
+    HFONT old_font = (HFONT)SelectObject(hdc, hfont);
+
+    /* Convert UTF-8 to wide string. */
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, text, (int)len, NULL, 0);
+    if (wlen <= 0) {
+        SelectObject(hdc, old_font);
+        DeleteObject(hfont);
+        DeleteDC(hdc);
+        return (float)len * font_size * 0.6f;
+    }
+
+    wchar_t *wtext = (wchar_t *)malloc((wlen + 1) * sizeof(wchar_t));
+    if (!wtext) {
+        SelectObject(hdc, old_font);
+        DeleteObject(hfont);
+        DeleteDC(hdc);
+        return (float)len * font_size * 0.6f;
+    }
+    MultiByteToWideChar(CP_UTF8, 0, text, (int)len, wtext, wlen);
+
+    SIZE sz;
+    GetTextExtentPoint32W(hdc, wtext, wlen, &sz);
+    float width = (float)sz.cx;
+
+    free(wtext);
+    SelectObject(hdc, old_font);
+    DeleteObject(hfont);
+    DeleteDC(hdc);
+
+    return width;
+}
+
 /* ── Home page ─────────────────────────────────────────────────────── */
 
 static const char *HOME_HTML =
@@ -79,26 +137,54 @@ static const char *HOME_HTML =
     "  body { font-family: sans-serif; margin: 40px; color: #333;\n"
     "         background-color: #f5f5f5; }\n"
     "  h1 { font-size: 36px; color: #1a1a2e; margin-bottom: 8px; }\n"
-    "  .sub { font-size: 14px; color: #888; margin-bottom: 32px; }\n"
+    "  .subtitle { font-size: 14px; color: #888; margin-bottom: 32px; }\n"
     "  .card { background-color: #fff; border: 1px solid #ddd;\n"
     "          padding: 20px; margin-bottom: 16px; }\n"
     "  .card h2 { font-size: 18px; color: #16213e; margin-bottom: 8px; }\n"
-    "  .card p { font-size: 14px; color: #555; }\n"
+    "  .card p { font-size: 14px; color: #555; line-height: 1.6; }\n"
+    "  .stats { display: flex; margin-top: 24px; }\n"
+    "  .stat { padding: 16px 24px; background-color: #e8f4f8;\n"
+    "          border: 1px solid #b8d4e3; margin-right: 12px; }\n"
+    "  .stat-num { font-size: 28px; font-weight: bold; color: #1a1a2e; }\n"
+    "  .stat-label { font-size: 12px; color: #666; }\n"
     "  .footer { margin-top: 32px; font-size: 12px; color: #aaa; }\n"
-    "</style></head><body>\n"
+    "</style>\n"
+    "</head><body>\n"
     "  <h1>Pane</h1>\n"
-    "  <div class=\"sub\">A web browser built from scratch in C17</div>\n"
+    "  <div class=\"subtitle\">A web browser built from scratch in C17</div>\n"
     "  <div class=\"card\">\n"
     "    <h2>Welcome</h2>\n"
-    "    <p>Type a file path or HTML in the address bar. The engine uses\n"
-    "       a pairwise context transition model for rendering.</p>\n"
+    "    <p>This is the Pane web browser. Type HTML in the address bar or\n"
+    "       load a local file to render it. The engine uses a pairwise\n"
+    "       context transition model for style and layout resolution.</p>\n"
     "  </div>\n"
     "  <div class=\"card\">\n"
-    "    <h2>Engine Stats</h2>\n"
-    "    <p>412 CSS properties, 130 HTML tags, 21 context fields,\n"
-    "       93 compressed rules, FreeType font rendering.</p>\n"
+    "    <h2>Architecture</h2>\n"
+    "    <p>HTML Parser (tokenizer + tree builder with 62 rules) feeds into\n"
+    "       a DOM tree. CSS cascade resolves styles. The pairwise context\n"
+    "       engine propagates 21 context fields down the tree. Block and\n"
+    "       inline layout produce positioned boxes. Cairo + FreeType render\n"
+    "       the final pixels.</p>\n"
     "  </div>\n"
-    "  <div class=\"footer\">Pane v0.1.0 — Win32 Native Build</div>\n"
+    "  <div class=\"stats\">\n"
+    "    <div class=\"stat\">\n"
+    "      <div class=\"stat-num\">412</div>\n"
+    "      <div class=\"stat-label\">CSS Properties</div>\n"
+    "    </div>\n"
+    "    <div class=\"stat\">\n"
+    "      <div class=\"stat-num\">130</div>\n"
+    "      <div class=\"stat-label\">HTML Tags</div>\n"
+    "    </div>\n"
+    "    <div class=\"stat\">\n"
+    "      <div class=\"stat-num\">21</div>\n"
+    "      <div class=\"stat-label\">Context Fields</div>\n"
+    "    </div>\n"
+    "    <div class=\"stat\">\n"
+    "      <div class=\"stat-num\">93</div>\n"
+    "      <div class=\"stat-label\">Compressed Rules</div>\n"
+    "    </div>\n"
+    "  </div>\n"
+    "  <div class=\"footer\">Pane v0.1.0 — Phase 2 C Rendering Engine</div>\n"
     "</body></html>\n";
 
 /* ── Load page ─────────────────────────────────────────────────────── */
@@ -276,31 +362,19 @@ static void paint_box_gdi(HDC hdc, const LayoutBox *box, float ox, float oy)
 
     /* Text. */
     if (box->type == BOX_TEXT && box->text && box->text_len > 0 && s) {
-        int font_height = -(int)(s->font_size * 96.0f / 72.0f);
-        int weight = s->font_weight >= 600 ? FW_BOLD : FW_NORMAL;
-
-        HFONT hfont = CreateFontA(
-            font_height, 0, 0, 0, weight,
-            FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-            OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS,
-            s->font_family ? s->font_family : "Segoe UI");
+        bool bold = s->font_weight >= 600;
+        HFONT hfont = create_gdi_font(s->font_size, bold, s->font_family);
 
         HFONT old_font = (HFONT)SelectObject(hdc, hfont);
         SetTextColor(hdc, RGB(s->color.r, s->color.g, s->color.b));
         SetBkMode(hdc, TRANSPARENT);
-
-        RECT text_rc = { (int)x, (int)y,
-                         (int)(x + box->rect.width + 200),
-                         (int)(y + box->rect.height + 200) };
 
         /* Convert UTF-8 to wide string. */
         int wlen = MultiByteToWideChar(CP_UTF8, 0, box->text, (int)box->text_len, NULL, 0);
         wchar_t *wtext = (wchar_t *)malloc((wlen + 1) * sizeof(wchar_t));
         if (wtext) {
             MultiByteToWideChar(CP_UTF8, 0, box->text, (int)box->text_len, wtext, wlen);
-            wtext[wlen] = L'\0';
-            DrawTextW(hdc, wtext, wlen, &text_rc, DT_LEFT | DT_TOP | DT_WORDBREAK);
+            TextOutW(hdc, (int)x, (int)y, wtext, wlen);
             free(wtext);
         }
 
@@ -503,6 +577,9 @@ int win32_browser_run(int argc, char **argv)
     memset(&g, 0, sizeof(g));
     g.viewport_w = 1024;
     g.viewport_h = 700;
+
+    /* Register GDI text measurement so layout gets accurate widths. */
+    layout_set_measure_fn(win32_measure_text_cb);
 
     /* Register window class. */
     WNDCLASSEXW wc = {0};
