@@ -374,7 +374,15 @@ static void paint_box_gdi(HDC hdc, const LayoutBox *box, float ox, float oy)
         wchar_t *wtext = (wchar_t *)malloc((wlen + 1) * sizeof(wchar_t));
         if (wtext) {
             MultiByteToWideChar(CP_UTF8, 0, box->text, (int)box->text_len, wtext, wlen);
-            TextOutW(hdc, (int)x, (int)y, wtext, wlen);
+
+            /* Use DrawTextW with word wrapping within the box content width. */
+            RECT text_rc;
+            text_rc.left   = (int)x;
+            text_rc.top    = (int)y;
+            text_rc.right  = (int)(x + box->rect.width);
+            text_rc.bottom = (int)(y + box->rect.height);
+            DrawTextW(hdc, wtext, wlen, &text_rc, DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+
             free(wtext);
         }
 
@@ -437,15 +445,24 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     case WM_SIZE: {
         int w = LOWORD(lParam);
         int h = HIWORD(lParam);
-        g.viewport_w = (float)w;
-        g.viewport_h = (float)(h - TOOLBAR_HEIGHT);
+        float new_w = (float)w;
+        float new_h = (float)(h - TOOLBAR_HEIGHT);
+
+        int size_changed = (new_w != g.viewport_w || new_h != g.viewport_h);
+        g.viewport_w = new_w;
+        g.viewport_h = new_h;
 
         /* Resize URL entry and go button. */
         int url_w = w - 210;
         MoveWindow(g.url_entry, 144, 6, url_w > 100 ? url_w : 100, 24, TRUE);
         MoveWindow(g.go_btn, w - 60, 4, 52, 28, TRUE);
 
-        InvalidateRect(hwnd, NULL, TRUE);
+        /* Re-layout page at new viewport dimensions. */
+        if (size_changed && g.has_content) {
+            navigate(g.current_url);
+        } else {
+            InvalidateRect(hwnd, NULL, TRUE);
+        }
         return 0;
     }
 
