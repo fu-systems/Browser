@@ -600,7 +600,8 @@ void browser_load_html(BrowserWindow *bw, const char *html, const char *title)
     render_page(bw, html, strlen(html), title);
 }
 
-void browser_navigate(BrowserWindow *bw, const char *url)
+static void browser_navigate_impl(BrowserWindow *bw, const char *url,
+                                  bool push_history)
 {
     BrowserTab *tab = active(bw);
     if (!tab) return;
@@ -637,7 +638,7 @@ void browser_navigate(BrowserWindow *bw, const char *url)
 
     /* Home page. */
     if (strcmp(url, "about:home") == 0 || strcmp(url, "") == 0) {
-        tab_push_history(tab, url);
+        if (push_history) tab_push_history(tab, url);
         render_page(bw, HOME_PAGE, strlen(HOME_PAGE), NULL);
         gtk_entry_set_text(GTK_ENTRY(bw->url_entry), url);
         update_nav_buttons(bw);
@@ -646,7 +647,7 @@ void browser_navigate(BrowserWindow *bw, const char *url)
 
     /* Inline HTML (starts with < or <!). */
     if (url[0] == '<') {
-        tab_push_history(tab, "about:html");
+        if (push_history) tab_push_history(tab, "about:html");
         render_page(bw, url, strlen(url), NULL);
         gtk_entry_set_text(GTK_ENTRY(bw->url_entry), "about:html");
         update_nav_buttons(bw);
@@ -675,7 +676,7 @@ void browser_navigate(BrowserWindow *bw, const char *url)
         buf[sz] = '\0';
         fclose(f);
 
-        tab_push_history(tab, url);
+        if (push_history) tab_push_history(tab, url);
         render_page(bw, buf, sz, NULL);
         free(buf);
 
@@ -740,13 +741,13 @@ void browser_navigate(BrowserWindow *bw, const char *url)
         if (resp->error) {
             char err[4096];
             snprintf(err, sizeof(err), ERROR_PAGE_FMT, url, resp->error);
-            tab_push_history(tab, url);
+            if (push_history) tab_push_history(tab, url);
             render_page(bw, err, strlen(err), "Error");
             gtk_label_set_text(GTK_LABEL(bw->status_bar), "Error");
         } else if (resp->body && resp->body_len > 0) {
             /* Sanitize response body to valid UTF-8 for Pango/GTK. */
             sanitize_utf8(resp->body, resp->body_len);
-            tab_push_history(tab, url);
+            if (push_history) tab_push_history(tab, url);
             render_page(bw, resp->body, resp->body_len, NULL);
 
             char status_msg[256];
@@ -756,7 +757,7 @@ void browser_navigate(BrowserWindow *bw, const char *url)
         } else {
             char err[4096];
             snprintf(err, sizeof(err), ERROR_PAGE_FMT, url, "Empty response.");
-            tab_push_history(tab, url);
+            if (push_history) tab_push_history(tab, url);
             render_page(bw, err, strlen(err), "Error");
             gtk_label_set_text(GTK_LABEL(bw->status_bar), "Empty response");
         }
@@ -771,7 +772,7 @@ void browser_navigate(BrowserWindow *bw, const char *url)
     if (strchr(url, '.') && url[0] != '<' && url[0] != '/') {
         char full_url[2048];
         snprintf(full_url, sizeof(full_url), "https://%s", url);
-        browser_navigate(bw, full_url);
+        browser_navigate_impl(bw, full_url, push_history);
         return;
     }
 
@@ -779,10 +780,15 @@ void browser_navigate(BrowserWindow *bw, const char *url)
     char err[4096];
     snprintf(err, sizeof(err), ERROR_PAGE_FMT, url,
              "Unsupported URL scheme.");
-    tab_push_history(tab, url);
+    if (push_history) tab_push_history(tab, url);
     render_page(bw, err, strlen(err), "Error");
     gtk_entry_set_text(GTK_ENTRY(bw->url_entry), url);
     update_nav_buttons(bw);
+}
+
+void browser_navigate(BrowserWindow *bw, const char *url)
+{
+    browser_navigate_impl(bw, url, true);
 }
 
 /* ── Tab management ────────────────────────────────────────────────── */
@@ -1612,7 +1618,7 @@ static gboolean on_key_press(GtkWidget *widget, GdkEventKey *event,
     /* Ctrl+R / F5: Reload. */
     if ((mods == GDK_CONTROL_MASK && key == GDK_KEY_r) ||
         key == GDK_KEY_F5) {
-        if (tab) browser_navigate(bw, tab->url);
+        if (tab) browser_navigate_impl(bw, tab->url, false);
         return TRUE;
     }
 
@@ -1620,7 +1626,7 @@ static gboolean on_key_press(GtkWidget *widget, GdkEventKey *event,
     if (mods == GDK_MOD1_MASK && key == GDK_KEY_Left) {
         if (tab && tab->history_pos > 0) {
             tab->history_pos--;
-            browser_navigate(bw, tab->history[tab->history_pos]);
+            browser_navigate_impl(bw, tab->history[tab->history_pos], false);
         }
         return TRUE;
     }
@@ -1629,7 +1635,7 @@ static gboolean on_key_press(GtkWidget *widget, GdkEventKey *event,
     if (mods == GDK_MOD1_MASK && key == GDK_KEY_Right) {
         if (tab && tab->history_pos < tab->history_count - 1) {
             tab->history_pos++;
-            browser_navigate(bw, tab->history[tab->history_pos]);
+            browser_navigate_impl(bw, tab->history[tab->history_pos], false);
         }
         return TRUE;
     }
@@ -1740,12 +1746,7 @@ static void on_back(GtkWidget *widget, gpointer data)
     tab->history_pos--;
     const char *url = tab->history[tab->history_pos];
     strncpy(tab->url, url, sizeof(tab->url) - 1);
-
-    if (strcmp(url, "about:home") == 0) {
-        render_page(bw, HOME_PAGE, strlen(HOME_PAGE), NULL);
-    } else {
-        browser_navigate(bw, url);
-    }
+    browser_navigate_impl(bw, url, false);
     gtk_entry_set_text(GTK_ENTRY(bw->url_entry), tab->url);
     update_nav_buttons(bw);
 }
@@ -1759,7 +1760,7 @@ static void on_forward(GtkWidget *widget, gpointer data)
     tab->history_pos++;
     const char *url = tab->history[tab->history_pos];
     strncpy(tab->url, url, sizeof(tab->url) - 1);
-    browser_navigate(bw, url);
+    browser_navigate_impl(bw, url, false);
     gtk_entry_set_text(GTK_ENTRY(bw->url_entry), tab->url);
     update_nav_buttons(bw);
 }
@@ -1768,7 +1769,7 @@ static void on_reload(GtkWidget *widget, gpointer data)
 {
     BrowserWindow *bw = data;
     BrowserTab *tab = active(bw);
-    if (tab) browser_navigate(bw, tab->url);
+    if (tab) browser_navigate_impl(bw, tab->url, false);
 }
 
 static void on_home(GtkWidget *widget, gpointer data)
