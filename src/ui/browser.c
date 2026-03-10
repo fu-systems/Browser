@@ -1872,14 +1872,20 @@ static void on_content_resize(GtkWidget *widget, GdkRectangle *alloc,
                                gpointer data)
 {
     BrowserWindow *bw = data;
-    bw->viewport_width = (float)alloc->width;
-    bw->viewport_height = (float)alloc->height;
+    float new_w = (float)alloc->width;
+    float new_h = (float)alloc->height;
 
-    /* Re-layout current page. */
+    /* Only re-layout if the size actually changed. */
+    bool size_changed = (fabsf(new_w - bw->viewport_width) > 1.0f ||
+                         fabsf(new_h - bw->viewport_height) > 1.0f);
+
+    bw->viewport_width = new_w;
+    bw->viewport_height = new_h;
+
     BrowserTab *tab = active(bw);
-    if (tab && tab->has_content) {
-        /* For now just redraw — full re-layout would re-run the pipeline. */
-        update_scroll(bw);
+    if (tab && tab->has_content && size_changed) {
+        /* Re-render with new viewport dimensions. */
+        browser_navigate_impl(bw, tab->url, false);
     }
 }
 

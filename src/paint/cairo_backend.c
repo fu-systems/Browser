@@ -100,80 +100,153 @@ static uint32_t utf8_next(const char **p, const char *end)
     return cp;
 }
 
+/* ── Glyph blitting helper ─────────────────────────────────────────── */
+
+static void render_glyph_at(CairoRenderer *r, PaneFont *font,
+                            uint32_t cp, float pen_x, float baseline_y,
+                            CssColor color)
+{
+    const GlyphBitmap *glyph = font_render_glyph(font, cp);
+    if (!glyph || !glyph->buffer) return;
+
+    cairo_t *cr = r->cr;
+    int gw = glyph->width;
+    int gh = glyph->height;
+
+    if (gw > 0 && gh > 0) {
+        int stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, gw);
+        unsigned char *pixels = calloc(1, stride * gh);
+
+        for (int row = 0; row < gh; row++) {
+            uint32_t *dst = (uint32_t *)(pixels + row * stride);
+            const uint8_t *src = glyph->buffer + row * gw;
+            for (int col = 0; col < gw; col++) {
+                uint8_t a = src[col];
+                if (a == 0) continue;
+                uint8_t pr = (uint8_t)(color.r * a / 255);
+                uint8_t pg = (uint8_t)(color.g * a / 255);
+                uint8_t pb = (uint8_t)(color.b * a / 255);
+                dst[col] = ((uint32_t)a << 24) | ((uint32_t)pr << 16) |
+                           ((uint32_t)pg << 8) | pb;
+            }
+        }
+
+        cairo_surface_t *surf = cairo_image_surface_create_for_data(
+            pixels, CAIRO_FORMAT_ARGB32, gw, gh, stride);
+
+        float gx = pen_x + glyph->bearing_x;
+        float gy = baseline_y - glyph->bearing_y;
+
+        cairo_set_source_surface(cr, surf, gx - r->scroll_x, gy - r->scroll_y);
+        cairo_paint(cr);
+
+        cairo_surface_destroy(surf);
+        free(pixels);
+    }
+}
+
+/* Advance pen_x for a codepoint, returning the advance width. */
+static float glyph_advance(PaneFont *font, uint32_t cp)
+{
+    const GlyphBitmap *glyph = font_render_glyph(font, cp);
+    return glyph ? (float)glyph->advance_x : font_char_width(font, cp);
+}
+
 /* ── Text rendering with FreeType glyphs blitted via Cairo ─────────── */
 
+/* max_width > 0 enables word-wrapping at that width. */
 static void render_text_ft(CairoRenderer *r, PaneFont *font,
                            const char *text, size_t len,
-                           float x, float y, CssColor color)
+                           float x, float y, CssColor color,
+                           float max_width)
 {
     if (!font || !text || len == 0) return;
 
-    cairo_t *cr = r->cr;
+    float line_h = font_line_height(font);
     float baseline_y = y + font_ascent(font);
     float pen_x = x;
+    float start_x = x;
 
     const char *p = text;
     const char *end = text + len;
 
-    while (p < end) {
-        uint32_t cp = utf8_next(&p, end);
-        if (cp == 0) break;
-
-        /* Skip control characters. */
-        if (cp < 32 && cp != '\t') continue;
-        if (cp == '\n' || cp == '\r') continue;
-
-        /* Tab → spaces. */
-        if (cp == '\t') {
-            pen_x += font_char_width(font, ' ') * 4;
-            continue;
-        }
-
-        const GlyphBitmap *glyph = font_render_glyph(font, cp);
-        if (!glyph || !glyph->buffer) {
-            pen_x += font_char_width(font, cp);
-            continue;
-        }
-
-        /* Create a Cairo image surface from the glyph bitmap. */
-        int gw = glyph->width;
-        int gh = glyph->height;
-
-        if (gw > 0 && gh > 0) {
-            /* We need to create an ARGB32 surface from the grayscale glyph.
-             * Stamp each pixel with the text color, using glyph alpha. */
-            int stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, gw);
-            unsigned char *pixels = calloc(1, stride * gh);
-
-            for (int row = 0; row < gh; row++) {
-                uint32_t *dst = (uint32_t *)(pixels + row * stride);
-                const uint8_t *src = glyph->buffer + row * gw;
-                for (int col = 0; col < gw; col++) {
-                    uint8_t a = src[col];
-                    if (a == 0) continue;
-                    /* Premultiplied ARGB. */
-                    uint8_t pr = (uint8_t)(color.r * a / 255);
-                    uint8_t pg = (uint8_t)(color.g * a / 255);
-                    uint8_t pb = (uint8_t)(color.b * a / 255);
-                    dst[col] = ((uint32_t)a << 24) | ((uint32_t)pr << 16) |
-                               ((uint32_t)pg << 8) | pb;
-                }
+    /* No wrapping: simple character-by-character render. */
+    if (max_width <= 0) {
+        while (p < end) {
+            uint32_t cp = utf8_next(&p, end);
+            if (cp == 0) break;
+            if (cp < 32 && cp != '\t') continue;
+            if (cp == '\n' || cp == '\r') continue;
+            if (cp == '\t') {
+                pen_x += font_char_width(font, ' ') * 4;
+                continue;
             }
+            render_glyph_at(r, font, cp, pen_x, baseline_y, color);
+            pen_x += glyph_advance(font, cp);
+        }
+        return;
+    }
 
-            cairo_surface_t *surf = cairo_image_surface_create_for_data(
-                pixels, CAIRO_FORMAT_ARGB32, gw, gh, stride);
+    /* Word-wrapping render. */
+    while (p < end) {
+        /* Skip leading spaces at start of line. */
+        if (pen_x == start_x) {
+            while (p < end && *p == ' ') p++;
+        }
+        if (p >= end) break;
 
-            float gx = pen_x + glyph->bearing_x;
-            float gy = baseline_y - glyph->bearing_y;
+        /* Remember where we are — we'll scan ahead to measure the word. */
+        const char *seg_start = p;
 
-            cairo_set_source_surface(cr, surf, gx - r->scroll_x, gy - r->scroll_y);
-            cairo_paint(cr);
+        /* Count leading whitespace (inter-word spaces). */
+        int space_count = 0;
+        while (p < end && *p == ' ') { p++; space_count++; }
 
-            cairo_surface_destroy(surf);
-            free(pixels);
+        /* Scan the word (non-space, non-newline characters). */
+        const char *word_begin = p;
+        float word_w = 0;
+        const char *scan = p;
+        while (scan < end && *scan != ' ' && *scan != '\n' && *scan != '\r') {
+            const char *prev = scan;
+            uint32_t cp = utf8_next(&scan, end);
+            if (cp == 0) break;
+            if (cp >= 32)
+                word_w += font_char_width(font, cp);
+        }
+        const char *word_end = scan;
+        p = scan;
+
+        /* Measure the inter-word space. */
+        float space_w = 0;
+        if (space_count > 0 && pen_x > start_x)
+            space_w = font_char_width(font, ' ') * (float)space_count;
+
+        /* Wrap if this word would exceed the line. */
+        if (pen_x + space_w + word_w > start_x + max_width && pen_x > start_x) {
+            pen_x = start_x;
+            baseline_y += line_h;
+            space_w = 0;
         }
 
-        pen_x += glyph->advance_x;
+        pen_x += space_w;
+
+        /* Render word glyphs. */
+        const char *rp = word_begin;
+        while (rp < word_end) {
+            uint32_t cp = utf8_next(&rp, end);
+            if (cp == 0) break;
+            if (cp < 32) continue;
+            render_glyph_at(r, font, cp, pen_x, baseline_y, color);
+            pen_x += glyph_advance(font, cp);
+        }
+
+        /* Handle explicit newlines. */
+        if (p < end && (*p == '\n' || *p == '\r')) {
+            pen_x = start_x;
+            baseline_y += line_h;
+            p++;
+            if (p < end && *(p-1) == '\r' && *p == '\n') p++;
+        }
     }
 }
 
@@ -238,8 +311,10 @@ static void render_box(CairoRenderer *r, const LayoutBox *box,
     if (box->text && box->text_len > 0 && s) {
         PaneFont *font = select_font(r, s);
         if (font) {
+            /* BOX_TEXT nodes use word wrapping at the box content width. */
+            float wrap_w = (box->type == BOX_TEXT) ? box->rect.width : 0;
             render_text_ft(r, font, box->text, box->text_len,
-                           x, y, s->color);
+                           x, y, s->color, wrap_w);
         }
     }
 
@@ -325,7 +400,8 @@ void cairo_render_display_list(CairoRenderer *r, const DisplayList *dl)
                 PaneFont *f = r->fonts.regular;
                 font_set_size(f, cmd->text.font_size);
                 render_text_ft(r, f, cmd->text.text, cmd->text.len,
-                              cmd->rect.x, cmd->rect.y, cmd->text.color);
+                              cmd->rect.x, cmd->rect.y, cmd->text.color,
+                              cmd->rect.width);
             }
             break;
         }
