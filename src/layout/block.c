@@ -333,7 +333,7 @@ static void layout_children(LayoutBox *box, Arena *arena)
                     continue;
                 }
 
-                layout_inline(child, content_width, arena);
+                layout_inline(child, content_width - x, arena);
 
                 float child_outer_w = child->rect.width + child->padding.left
                     + child->padding.right + child->border.left + child->border.right
@@ -342,35 +342,59 @@ static void layout_children(LayoutBox *box, Arena *arena)
                     + child->padding.bottom + child->border.top + child->border.bottom
                     + child->margin.top + child->margin.bottom;
 
-                /* Wrap to next line if needed (unless nowrap). */
-                if (!no_wrap && x + child_outer_w > content_width && x > 0) {
-                    /* Apply text-align to completed line. */
-                    if (align == TEXT_ALIGN_CENTER || align == TEXT_ALIGN_RIGHT ||
-                        align == TEXT_ALIGN_END) {
-                        float offset = content_width - x;
-                        if (align == TEXT_ALIGN_CENTER) offset /= 2.0f;
-                        if (offset > 0) {
-                            for (LayoutBox *lc = line_start; lc && lc != child;
-                                 lc = lc->next_sibling) {
-                                if (lc->style && lc->style->display == DISPLAY_NONE)
-                                    continue;
-                                lc->rect.x += offset;
+                /* Check if this text box wraps to multiple lines internally. */
+                bool text_wraps = (child->type == BOX_TEXT &&
+                                   child->last_line_width >= 0 &&
+                                   child->rect.height > default_line_h * 1.5f);
+
+                if (text_wraps) {
+                    /* Multi-line text: position at current x, then advance
+                     * cursor_y to the last line and set x to last line width. */
+                    if (!line_start) line_start = child;
+
+                    child->rect.x = x + child->margin.left + child->border.left + child->padding.left;
+                    child->rect.y = cursor_y + child->margin.top + child->border.top + child->padding.top;
+
+                    /* Advance past all complete lines. */
+                    float last_line_h = default_line_h;
+                    float upper_lines_h = child_outer_h - last_line_h;
+                    if (upper_lines_h > 0)
+                        cursor_y += upper_lines_h;
+
+                    x = child->last_line_width;
+                    line_h = last_line_h;
+                    line_start = NULL; /* text-align doesn't apply cleanly to wrapped text */
+                } else {
+                    /* Wrap to next line if needed (unless nowrap). */
+                    if (!no_wrap && x + child_outer_w > content_width && x > 0) {
+                        /* Apply text-align to completed line. */
+                        if (align == TEXT_ALIGN_CENTER || align == TEXT_ALIGN_RIGHT ||
+                            align == TEXT_ALIGN_END) {
+                            float offset = content_width - x;
+                            if (align == TEXT_ALIGN_CENTER) offset /= 2.0f;
+                            if (offset > 0) {
+                                for (LayoutBox *lc = line_start; lc && lc != child;
+                                     lc = lc->next_sibling) {
+                                    if (lc->style && lc->style->display == DISPLAY_NONE)
+                                        continue;
+                                    lc->rect.x += offset;
+                                }
                             }
                         }
+                        cursor_y += line_h > 0 ? line_h : default_line_h;
+                        x = 0;
+                        line_h = 0;
+                        line_start = child;
+                        line_start_y = cursor_y;
                     }
-                    cursor_y += line_h > 0 ? line_h : default_line_h;
-                    x = 0;
-                    line_h = 0;
-                    line_start = child;
-                    line_start_y = cursor_y;
+
+                    if (!line_start) line_start = child;
+
+                    child->rect.x = x + child->margin.left + child->border.left + child->padding.left;
+                    child->rect.y = cursor_y + child->margin.top + child->border.top + child->padding.top;
+                    x += child_outer_w;
+                    if (child_outer_h > line_h) line_h = child_outer_h;
                 }
-
-                if (!line_start) line_start = child;
-
-                child->rect.x = x + child->margin.left + child->border.left + child->padding.left;
-                child->rect.y = cursor_y + child->margin.top + child->border.top + child->padding.top;
-                x += child_outer_w;
-                if (child_outer_h > line_h) line_h = child_outer_h;
             }
 
             /* Apply text-align to the last line. */

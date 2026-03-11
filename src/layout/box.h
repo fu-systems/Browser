@@ -63,6 +63,14 @@ struct LayoutBox {
     const char     *text;
     size_t          text_len;
 
+    /* For text boxes that wrap: width of the last line (< rect.width).
+     * Used by the block-level inline formatter to continue inline flow
+     * on the last line of a multi-line text box. -1 = not wrapped. */
+    float           last_line_width;
+
+    /* Image surface for <img> elements (cairo_surface_t*, owned). */
+    void           *image_surface;
+
     /* Pairwise context for this box's children. */
     PairwiseContext ctx;
 };

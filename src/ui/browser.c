@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <ctype.h>
 #include <math.h>
+#include <gdk-pixbuf/gdk-pixbuf.h>
 
 /* ── Forward declarations ──────────────────────────────────────────── */
 
@@ -27,6 +28,7 @@ static void update_plugin_button_style(GtkWidget *btn, bool enabled);
 static void dismiss_form_widget(BrowserWindow *bw);
 static gboolean on_form_widget_focus_out(GtkWidget *widget, GdkEvent *event,
                                           gpointer data);
+static void free_image_surfaces(LayoutBox *box);
 
 /* ── Font-based text measurement for layout ──────────────────────── */
 
@@ -294,6 +296,9 @@ static BrowserTab *active(BrowserWindow *bw)
 static void tab_free_content(BrowserTab *tab)
 {
     if (tab->has_content) {
+        /* Free image surfaces before destroying the layout arena. */
+        if (tab->result.layout_tree && tab->result.layout_tree->root)
+            free_image_surfaces(tab->result.layout_tree->root);
         pane_result_free(&tab->result);
         tab->has_content = false;
     }
@@ -335,6 +340,166 @@ static void tab_push_history(BrowserTab *tab, const char *url)
 
 /* External CSS fetching: now in browser_common.c */
 
+/* ── Image Loading ─────────────────────────────────────────────────── */
+
+/* Recursively free cairo_surface_t objects stored on layout boxes. */
+static void free_image_surfaces(LayoutBox *box)
+{
+    if (!box) return;
+    if (box->image_surface) {
+        cairo_surface_destroy((cairo_surface_t *)box->image_surface);
+        box->image_surface = NULL;
+    }
+    for (LayoutBox *child = box->first_child; child; child = child->next_sibling)
+        free_image_surfaces(child);
+}
+
+/* Load an image from HTTP response bytes into a cairo_surface_t via GdkPixbuf. */
+static cairo_surface_t *decode_image_data(const unsigned char *data, size_t len)
+{
+    if (!data || len == 0) return NULL;
+
+    GdkPixbufLoader *loader = gdk_pixbuf_loader_new();
+    if (!loader) return NULL;
+
+    GError *err = NULL;
+    if (!gdk_pixbuf_loader_write(loader, data, len, &err)) {
+        if (err) g_error_free(err);
+        gdk_pixbuf_loader_close(loader, NULL);
+        g_object_unref(loader);
+        return NULL;
+    }
+
+    if (!gdk_pixbuf_loader_close(loader, &err)) {
+        if (err) g_error_free(err);
+        g_object_unref(loader);
+        return NULL;
+    }
+
+    GdkPixbuf *pixbuf = gdk_pixbuf_loader_get_pixbuf(loader);
+    if (!pixbuf) {
+        g_object_unref(loader);
+        return NULL;
+    }
+
+    /* Convert to a format Cairo can use (ARGB32). */
+    int pw = gdk_pixbuf_get_width(pixbuf);
+    int ph = gdk_pixbuf_get_height(pixbuf);
+    int channels = gdk_pixbuf_get_n_channels(pixbuf);
+    int rowstride = gdk_pixbuf_get_rowstride(pixbuf);
+    const guchar *pixels = gdk_pixbuf_get_pixels(pixbuf);
+
+    int stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, pw);
+    unsigned char *cairo_data = calloc(1, stride * ph);
+    if (!cairo_data) {
+        g_object_unref(loader);
+        return NULL;
+    }
+
+    for (int y = 0; y < ph; y++) {
+        const guchar *src_row = pixels + y * rowstride;
+        uint32_t *dst_row = (uint32_t *)(cairo_data + y * stride);
+        for (int x = 0; x < pw; x++) {
+            uint8_t r = src_row[x * channels + 0];
+            uint8_t g = src_row[x * channels + 1];
+            uint8_t b = src_row[x * channels + 2];
+            uint8_t a = (channels >= 4) ? src_row[x * channels + 3] : 255;
+            /* Cairo ARGB32 is premultiplied alpha, native endian. */
+            uint8_t pr = (uint8_t)(r * a / 255);
+            uint8_t pg = (uint8_t)(g * a / 255);
+            uint8_t pb = (uint8_t)(b * a / 255);
+            dst_row[x] = ((uint32_t)a << 24) | ((uint32_t)pr << 16) |
+                         ((uint32_t)pg << 8) | pb;
+        }
+    }
+
+    cairo_surface_t *surf = cairo_image_surface_create_for_data(
+        cairo_data, CAIRO_FORMAT_ARGB32, pw, ph, stride);
+
+    /* Attach the pixel data to the surface so it gets freed with the surface. */
+    static cairo_user_data_key_t pixel_key;
+    cairo_surface_set_user_data(surf, &pixel_key, cairo_data, free);
+
+    g_object_unref(loader);
+    return surf;
+}
+
+/* Apply loaded image surface dimensions to a layout box. */
+static void apply_image_dimensions(LayoutBox *box, cairo_surface_t *img)
+{
+    box->image_surface = img;
+    int iw = cairo_image_surface_get_width(img);
+    int ih = cairo_image_surface_get_height(img);
+    const char *w_attr = elem_get_attr(box->node, "width");
+    const char *h_attr = elem_get_attr(box->node, "height");
+    if (!w_attr && !h_attr && iw > 0 && ih > 0) {
+        box->rect.width = (float)(iw > 800 ? 800 : iw);
+        box->rect.height = (float)(ih > 600 ? 600 : ih);
+    } else if (w_attr && !h_attr && iw > 0 && ih > 0) {
+        float w = (float)atoi(w_attr);
+        box->rect.height = w * ih / iw;
+    } else if (!w_attr && h_attr && iw > 0 && ih > 0) {
+        float h = (float)atoi(h_attr);
+        box->rect.width = h * iw / ih;
+    }
+}
+
+/* Walk the layout tree and fetch images for <img> boxes. */
+static void load_images_recursive(LayoutBox *box, const char *base_url)
+{
+    if (!box) return;
+
+    /* Check if this is an <img> element with a src attribute. */
+    if (box->node && box->node->type == PANE_NODE_ELEMENT &&
+        box->node->elem.tag == TAG_IMG && !box->image_surface) {
+        const char *src = elem_get_attr(box->node, "src");
+        if (src && src[0]) {
+            char resolved[2048];
+            resolve_url(base_url, src, resolved, sizeof(resolved));
+
+            cairo_surface_t *img = NULL;
+
+            if (strncmp(resolved, "http", 4) == 0) {
+                /* Fetch via HTTP. */
+                HttpResponse *resp = http_get(resolved, 3);
+                if (resp) {
+                    if (resp->status_code == 200 && resp->body && resp->body_len > 0) {
+                        img = decode_image_data(
+                            (const unsigned char *)resp->body, resp->body_len);
+                    }
+                    http_response_free(resp);
+                }
+            } else if (strncmp(resolved, "file://", 7) == 0 || resolved[0] == '/') {
+                /* Load local file. */
+                const char *path = resolved;
+                if (strncmp(resolved, "file:///", 8) == 0) path = resolved + 7;
+                else if (strncmp(resolved, "file://", 7) == 0) path = resolved + 7;
+                FILE *f = fopen(path, "rb");
+                if (f) {
+                    fseek(f, 0, SEEK_END);
+                    long sz = ftell(f);
+                    fseek(f, 0, SEEK_SET);
+                    if (sz > 0 && sz < 50 * 1024 * 1024) {
+                        unsigned char *buf = malloc(sz);
+                        if (buf) {
+                            size_t nread = fread(buf, 1, sz, f);
+                            img = decode_image_data(buf, nread);
+                            free(buf);
+                        }
+                    }
+                    fclose(f);
+                }
+            }
+
+            if (img)
+                apply_image_dimensions(box, img);
+        }
+    }
+
+    for (LayoutBox *child = box->first_child; child; child = child->next_sibling)
+        load_images_recursive(child, base_url);
+}
+
 /* ── Rendering ─────────────────────────────────────────────────────── */
 
 static void render_page(BrowserWindow *bw, const char *html, size_t len,
@@ -360,6 +525,14 @@ static void render_page(BrowserWindow *bw, const char *html, size_t len,
     /* Run plugin DOM-ready hook (lets plugins mutate the DOM). */
     if (bw->plugin_pipeline && tab->result.document)
         pipeline_run_dom_ready(bw->plugin_pipeline, tab->result.document);
+
+    /* Fetch and decode images for <img> elements. */
+    if (tab->result.layout_tree && tab->result.layout_tree->root && tab->url[0]) {
+        gtk_label_set_text(GTK_LABEL(bw->status_bar), "Loading images...");
+        while (gtk_events_pending()) gtk_main_iteration();
+        load_images_recursive(tab->result.layout_tree->root, tab->url);
+    }
+
     tab->scroll_x = 0;
     tab->scroll_y = 0;
 

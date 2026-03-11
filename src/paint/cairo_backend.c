@@ -307,8 +307,29 @@ static void render_box(CairoRenderer *r, const LayoutBox *box,
         cairo_fill(cr);
     }
 
-    /* Text content (BOX_TEXT nodes and replaced elements with text like buttons/inputs). */
-    if (box->text && box->text_len > 0 && s) {
+    /* Image content for <img> elements with loaded image data. */
+    if (box->image_surface) {
+        cairo_surface_t *img = (cairo_surface_t *)box->image_surface;
+        float img_x = x - r->scroll_x;
+        float img_y = y - r->scroll_y;
+
+        int img_w = cairo_image_surface_get_width(img);
+        int img_h = cairo_image_surface_get_height(img);
+        if (img_w > 0 && img_h > 0) {
+            double scale_x = (double)box->rect.width / img_w;
+            double scale_y = (double)box->rect.height / img_h;
+            cairo_save(cr);
+            cairo_translate(cr, img_x, img_y);
+            cairo_scale(cr, scale_x, scale_y);
+            cairo_set_source_surface(cr, img, 0, 0);
+            cairo_paint(cr);
+            cairo_restore(cr);
+        }
+    }
+
+    /* Text content (BOX_TEXT nodes and replaced elements with text like buttons/inputs).
+     * Skip text rendering if this box has a loaded image. */
+    if (!box->image_surface && box->text && box->text_len > 0 && s) {
         PaneFont *font = select_font(r, s);
         if (font) {
             /* BOX_TEXT nodes use word wrapping at the box content width. */

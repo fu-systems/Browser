@@ -12,6 +12,7 @@ LayoutBox *layout_box_create(Arena *arena, LayoutBoxType type,
     box->type = type;
     box->node = node;
     box->style = style;
+    box->last_line_width = -1;
     return box;
 }
 

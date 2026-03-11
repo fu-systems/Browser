@@ -99,6 +99,7 @@ void layout_inline(LayoutBox *box, float available_width, Arena *arena)
         float x = 0;
         float y = 0;
         float max_x = 0;
+        int line_count = 0;
         size_t pos = 0;
 
         if (preserve_spaces) {
@@ -108,6 +109,7 @@ void layout_inline(LayoutBox *box, float available_width, Arena *arena)
                     if (x > max_x) max_x = x;
                     x = 0;
                     y += line_h;
+                    line_count++;
                     pos++;
                     continue;
                 }
@@ -138,6 +140,7 @@ void layout_inline(LayoutBox *box, float available_width, Arena *arena)
                     if (x > max_x) max_x = x;
                     x = 0;
                     y += line_h;
+                    line_count++;
                 }
 
                 x += word_w;
@@ -150,10 +153,13 @@ void layout_inline(LayoutBox *box, float available_width, Arena *arena)
         }
 
         if (x > max_x) max_x = x;
-        if (x > 0) y += line_h; /* last line */
+        if (x > 0) { y += line_h; line_count++; } /* last line */
 
         box->rect.width = max_x > 0 ? max_x : (no_wrap ? 0 : available_width);
         box->rect.height = y;
+
+        /* Track last line width for inline continuation. */
+        box->last_line_width = (line_count > 1) ? x : -1;
     } else if (box->type == BOX_INLINE || box->type == BOX_INLINE_BLOCK) {
         /* Inline box: lay out inline children. */
         float x = 0;
