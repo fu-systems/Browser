@@ -9,6 +9,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <math.h>
 
 /* ── Unit Lookup ────────────────────────────────────────────────────── */
 
@@ -143,28 +144,141 @@ CssValue css_parse_value(const char *input, size_t len, Arena *arena)
             }
             return (CssValue){ .type = VAL_URL, .url = "" };
         }
-        /* For rgb(), rgba(), etc. — simplified: store as keyword for now. */
+        /* rgb(), rgba() color functions. */
         if (str_eq_ci(tok.start, tok.len, "rgb") ||
             str_eq_ci(tok.start, tok.len, "rgba")) {
-            /* Parse rgb(r, g, b) / rgba(r, g, b, a). */
-            float vals[4] = {0, 0, 0, 255};
+            float vals[4] = {0, 0, 0, 1};
+            bool is_pct[4] = {false, false, false, false};
             int vi = 0;
             CssToken arg;
             while (css_tokenizer_next(&t, &arg)) {
                 if (arg.type == CSSTOK_RPAREN || arg.type == CSSTOK_EOF) break;
-                if ((arg.type == CSSTOK_NUMBER || arg.type == CSSTOK_PERCENTAGE)
-                    && vi < 4) {
-                    vals[vi++] = arg.num_value;
+                if (vi < 4) {
+                    if (arg.type == CSSTOK_PERCENTAGE) {
+                        vals[vi] = arg.num_value;
+                        is_pct[vi] = true;
+                        vi++;
+                    } else if (arg.type == CSSTOK_NUMBER) {
+                        vals[vi] = arg.num_value;
+                        vi++;
+                    }
                 }
+            }
+            /* Convert R, G, B: percentages map 0-100 → 0-255. */
+            for (int c = 0; c < 3 && c < vi; c++) {
+                if (is_pct[c])
+                    vals[c] = vals[c] * 255.0f / 100.0f;
+            }
+            /* Alpha: percentage maps 0-100 → 0-1, number already 0-1. */
+            uint8_t alpha = 255;
+            if (vi >= 4) {
+                float a = is_pct[3] ? vals[3] / 100.0f : vals[3];
+                if (a < 0) a = 0; if (a > 1) a = 1;
+                alpha = (uint8_t)(a * 255);
             }
             return (CssValue){
                 .type = VAL_COLOR,
                 .color = { (uint8_t)vals[0], (uint8_t)vals[1],
-                           (uint8_t)vals[2],
-                           vi >= 4 ? (uint8_t)(vals[3] * 255) : 255 },
+                           (uint8_t)vals[2], alpha },
             };
         }
-        /* Skip function content. */
+        /* hsl(), hsla() color functions. */
+        if (str_eq_ci(tok.start, tok.len, "hsl") ||
+            str_eq_ci(tok.start, tok.len, "hsla")) {
+            float vals[4] = {0, 0, 0, 1};
+            bool is_pct[4] = {false, false, false, false};
+            int vi = 0;
+            CssToken arg;
+            while (css_tokenizer_next(&t, &arg)) {
+                if (arg.type == CSSTOK_RPAREN || arg.type == CSSTOK_EOF) break;
+                if (vi < 4) {
+                    if (arg.type == CSSTOK_PERCENTAGE) {
+                        vals[vi] = arg.num_value;
+                        is_pct[vi] = true;
+                        vi++;
+                    } else if (arg.type == CSSTOK_NUMBER || arg.type == CSSTOK_DIMENSION) {
+                        vals[vi] = arg.num_value;
+                        vi++;
+                    }
+                }
+            }
+            /* H = hue in degrees (0-360), S = saturation %, L = lightness % */
+            float h = vals[0];
+            float s = (is_pct[1] ? vals[1] : vals[1]) / 100.0f;
+            float l = (is_pct[2] ? vals[2] : vals[2]) / 100.0f;
+            if (s < 0) s = 0; if (s > 1) s = 1;
+            if (l < 0) l = 0; if (l > 1) l = 1;
+            /* Normalize hue to 0-360. */
+            h = fmodf(h, 360.0f);
+            if (h < 0) h += 360.0f;
+            /* HSL to RGB conversion. */
+            float c = (1.0f - fabsf(2.0f * l - 1.0f)) * s;
+            float x = c * (1.0f - fabsf(fmodf(h / 60.0f, 2.0f) - 1.0f));
+            float m = l - c / 2.0f;
+            float r1, g1, b1;
+            if (h < 60)       { r1 = c; g1 = x; b1 = 0; }
+            else if (h < 120) { r1 = x; g1 = c; b1 = 0; }
+            else if (h < 180) { r1 = 0; g1 = c; b1 = x; }
+            else if (h < 240) { r1 = 0; g1 = x; b1 = c; }
+            else if (h < 300) { r1 = x; g1 = 0; b1 = c; }
+            else              { r1 = c; g1 = 0; b1 = x; }
+            uint8_t alpha = 255;
+            if (vi >= 4) {
+                float a = is_pct[3] ? vals[3] / 100.0f : vals[3];
+                if (a < 0) a = 0; if (a > 1) a = 1;
+                alpha = (uint8_t)(a * 255);
+            }
+            return (CssValue){
+                .type = VAL_COLOR,
+                .color = { (uint8_t)((r1 + m) * 255),
+                           (uint8_t)((g1 + m) * 255),
+                           (uint8_t)((b1 + m) * 255), alpha },
+            };
+        }
+        /* var() — extract fallback value if present. */
+        if (str_eq_ci(tok.start, tok.len, "var")) {
+            /* var(--name, fallback) — skip the custom property name,
+             * look for a comma-separated fallback value. */
+            bool found_comma = false;
+            const char *fallback_start = NULL;
+            const char *fallback_end = NULL;
+            int depth = 1;
+            CssToken ft;
+            while (depth > 0 && css_tokenizer_next(&t, &ft)) {
+                if (ft.type == CSSTOK_FUNCTION || ft.type == CSSTOK_LPAREN) depth++;
+                if (ft.type == CSSTOK_RPAREN) {
+                    depth--;
+                    if (depth == 0) {
+                        fallback_end = ft.start;
+                        break;
+                    }
+                }
+                if (ft.type == CSSTOK_EOF) break;
+                if (!found_comma && depth == 1 &&
+                    ft.type == CSSTOK_COMMA) {
+                    found_comma = true;
+                    fallback_start = t.input + t.pos;
+                    continue;
+                }
+                if (found_comma && depth == 1) {
+                    fallback_end = ft.start + ft.len;
+                }
+            }
+            if (found_comma && fallback_start && fallback_end &&
+                fallback_end > fallback_start) {
+                /* Skip leading whitespace in fallback. */
+                while (fallback_start < fallback_end &&
+                       (*fallback_start == ' ' || *fallback_start == '\t'))
+                    fallback_start++;
+                if (fallback_end > fallback_start) {
+                    return css_parse_value(fallback_start,
+                        (size_t)(fallback_end - fallback_start), arena);
+                }
+            }
+            /* No fallback — return inherit to let inheritance handle it. */
+            return (CssValue){ .type = VAL_INHERIT };
+        }
+        /* Skip unknown function content. */
         {
             int depth = 1;
             CssToken ft;
@@ -719,27 +833,33 @@ static bool try_expand_shorthand(CssPropId prop_id, const char *value_start,
                 continue;
             }
 
-            /* rgb()/rgba() color function */
+            /* rgb()/rgba()/hsl()/hsla() color function */
             if (btok.type == CSSTOK_FUNCTION &&
                 (str_eq_ci(btok.start, btok.len, "rgb") ||
-                 str_eq_ci(btok.start, btok.len, "rgba"))) {
-                float vals[4] = {0, 0, 0, 255};
-                int vi = 0;
+                 str_eq_ci(btok.start, btok.len, "rgba") ||
+                 str_eq_ci(btok.start, btok.len, "hsl") ||
+                 str_eq_ci(btok.start, btok.len, "hsla"))) {
+                /* Reparse by computing the value from the function start. */
+                const char *fn_start = btok.start;
+                /* Find end of function (closing paren). */
+                int depth = 1;
                 CssToken arg;
+                const char *fn_end = btok.start + btok.len;
                 while (css_tokenizer_next(&bt, &arg)) {
-                    if (arg.type == CSSTOK_RPAREN || arg.type == CSSTOK_EOF) break;
-                    if ((arg.type == CSSTOK_NUMBER || arg.type == CSSTOK_PERCENTAGE)
-                        && vi < 4)
-                        vals[vi++] = arg.num_value;
+                    if (arg.type == CSSTOK_RPAREN) {
+                        fn_end = arg.start + arg.len;
+                        break;
+                    }
+                    if (arg.type == CSSTOK_EOF) break;
                 }
                 if (!has_color) {
-                    declblock_push(db, (CssDeclaration){ CSS_PROP_BACKGROUND_COLOR,
-                        (CssValue){ .type = VAL_COLOR,
-                            .color = { (uint8_t)vals[0], (uint8_t)vals[1],
-                                       (uint8_t)vals[2],
-                                       vi >= 4 ? (uint8_t)(vals[3] * 255) : 255 } },
-                        important }, arena);
-                    has_color = true;
+                    CssValue cv = css_parse_value(fn_start,
+                        (size_t)(fn_end - fn_start), arena);
+                    if (cv.type == VAL_COLOR) {
+                        declblock_push(db, (CssDeclaration){ CSS_PROP_BACKGROUND_COLOR,
+                            cv, important }, arena);
+                        has_color = true;
+                    }
                 }
                 continue;
             }
