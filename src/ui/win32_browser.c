@@ -60,6 +60,29 @@
 #define STATUSBAR_HEIGHT 22
 #define MAX_URL 2048
 #define MAX_HISTORY 64
+#define MAX_FORM_VALUES 64
+#define IDC_FORM_EDIT  2001
+
+/* ── Form value storage ────────────────────────────────────────────── */
+
+typedef struct {
+    const DomNode *node;
+    char          *value;
+} FormFieldValue;
+
+/* ── Text selection state ──────────────────────────────────────────── */
+
+typedef struct {
+    int            active;     /* currently dragging */
+    int            has_sel;    /* selection exists */
+    float          start_x;   /* page coordinates */
+    float          start_y;
+    float          end_x;
+    float          end_y;
+    /* Collected selected text (built after mouse-up). */
+    char          *text;
+    size_t         text_len;
+} TextSelection;
 
 /* ── State ─────────────────────────────────────────────────────────── */
 
@@ -94,6 +117,18 @@ static struct {
     HCURSOR  cursor_hand;
     HCURSOR  cursor_ibeam;
     HCURSOR  current_cursor;
+
+    /* Form input overlay. */
+    HWND              form_edit;       /* active EDIT control (or NULL) */
+    const DomNode    *form_edit_node;  /* DOM node being edited */
+    WNDPROC           form_edit_orig_proc;  /* original EDIT wndproc */
+
+    /* Form value storage. */
+    FormFieldValue    form_values[MAX_FORM_VALUES];
+    int               form_value_count;
+
+    /* Text selection. */
+    TextSelection     sel;
 } g;
 
 /* ── Forward declarations ──────────────────────────────────────────── */
@@ -102,6 +137,12 @@ static void navigate_impl(const char *url, int push_history);
 static void navigate(const char *url);
 static void update_nav_buttons(void);
 static void set_status(const char *text);
+static void handle_form_submit(const DomNode *form_node);
+static void dismiss_form_edit(void);
+static void spawn_form_edit(const DomNode *node, const LayoutBox *box);
+static void clear_selection(void);
+static void collect_selected_text(void);
+static void copy_selection_to_clipboard(void);
 
 /* ── GDI text measurement callback ─────────────────────────────────── */
 
@@ -261,6 +302,319 @@ static void set_status(const char *text)
         SetWindowTextA(g.status_label, text ? text : "");
 }
 
+/* ── Form value management ─────────────────────────────────────────── */
+
+static void clear_form_values(void)
+{
+    for (int i = 0; i < g.form_value_count; i++)
+        free(g.form_values[i].value);
+    g.form_value_count = 0;
+}
+
+static const char *get_form_value(const DomNode *node)
+{
+    for (int i = 0; i < g.form_value_count; i++) {
+        if (g.form_values[i].node == node)
+            return g.form_values[i].value;
+    }
+    return NULL;
+}
+
+static void set_form_value(const DomNode *node, const char *value)
+{
+    for (int i = 0; i < g.form_value_count; i++) {
+        if (g.form_values[i].node == node) {
+            free(g.form_values[i].value);
+            g.form_values[i].value = _strdup(value);
+            return;
+        }
+    }
+    if (g.form_value_count < MAX_FORM_VALUES) {
+        g.form_values[g.form_value_count].node = node;
+        g.form_values[g.form_value_count].value = _strdup(value);
+        g.form_value_count++;
+    }
+}
+
+/* ── Form edit overlay ─────────────────────────────────────────────── */
+
+static LRESULT CALLBACK FormEditProc(HWND hwnd, UINT msg, WPARAM wParam,
+                                      LPARAM lParam)
+{
+    if (msg == WM_KEYDOWN) {
+        if (wParam == VK_ESCAPE) {
+            /* Dismiss without saving. */
+            HWND edit = g.form_edit;
+            g.form_edit = NULL;
+            g.form_edit_node = NULL;
+            DestroyWindow(edit);
+            SetFocus(g.hwnd);
+            return 0;
+        }
+        if (wParam == VK_RETURN) {
+            /* Save value, then try to submit parent form. */
+            if (g.form_edit && g.form_edit_node) {
+                char buf[4096];
+                GetWindowTextA(g.form_edit, buf, sizeof(buf));
+                set_form_value(g.form_edit_node, buf);
+
+                const DomNode *form = find_form_parent(g.form_edit_node);
+                dismiss_form_edit();
+                if (form)
+                    handle_form_submit(form);
+            } else {
+                dismiss_form_edit();
+            }
+            return 0;
+        }
+    }
+    if (msg == WM_KILLFOCUS) {
+        /* Save and dismiss when focus leaves. */
+        if (g.form_edit && g.form_edit_node) {
+            char buf[4096];
+            GetWindowTextA(g.form_edit, buf, sizeof(buf));
+            set_form_value(g.form_edit_node, buf);
+        }
+        /* Post a message to dismiss asynchronously (avoid destroying
+         * the window while processing its own message). */
+        PostMessage(g.hwnd, WM_APP + 1, 0, 0);
+    }
+    return CallWindowProcW(g.form_edit_orig_proc, hwnd, msg, wParam, lParam);
+}
+
+static void dismiss_form_edit(void)
+{
+    if (!g.form_edit) return;
+
+    /* Save current value before destroying. */
+    if (g.form_edit_node) {
+        char buf[4096];
+        GetWindowTextA(g.form_edit, buf, sizeof(buf));
+        set_form_value(g.form_edit_node, buf);
+    }
+
+    HWND edit = g.form_edit;
+    g.form_edit = NULL;
+    g.form_edit_node = NULL;
+    g.form_edit_orig_proc = NULL;
+    DestroyWindow(edit);
+    SetFocus(g.hwnd);
+}
+
+static void spawn_form_edit(const DomNode *node, const LayoutBox *box)
+{
+    dismiss_form_edit();
+
+    /* Compute absolute position of the box. */
+    float abs_x, abs_y;
+    layout_box_abs_position(box, &abs_x, &abs_y);
+
+    /* Convert to screen coordinates (subtract scroll, add toolbar). */
+    int sx = (int)abs_x;
+    int sy = (int)(abs_y - g.scroll_y) + TOOLBAR_HEIGHT;
+    int sw = (int)(box->rect.width + box->padding.left + box->padding.right);
+    int sh = (int)(box->rect.height + box->padding.top + box->padding.bottom);
+
+    if (sw < 40) sw = 40;
+    if (sh < 20) sh = 20;
+
+    /* Get initial value. */
+    const char *initial = get_form_value(node);
+    if (!initial) {
+        initial = elem_get_attr(node, "value");
+        if (!initial && node->elem.tag == TAG_TEXTAREA) {
+            DomNode *tc = node->first_child;
+            if (tc && tc->type == PANE_NODE_TEXT && tc->text.data)
+                initial = tc->text.data;
+        }
+    }
+    if (!initial) initial = "";
+
+    /* Determine if password. */
+    DWORD style = WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL;
+    const char *type = elem_get_attr(node, "type");
+    if (type && strcmp(type, "password") == 0)
+        style |= ES_PASSWORD;
+
+    /* For textarea, use multiline. */
+    if (node->elem.tag == TAG_TEXTAREA)
+        style = (style & ~ES_AUTOHSCROLL) | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN;
+
+    HINSTANCE hInst = (HINSTANCE)GetWindowLongPtr(g.hwnd, GWLP_HINSTANCE);
+    g.form_edit = CreateWindowA("EDIT", initial, style,
+                                 sx, sy, sw, sh,
+                                 g.hwnd, (HMENU)IDC_FORM_EDIT, hInst, NULL);
+
+    /* Set font. */
+    HFONT ui_font = CreateFontA(-13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, "Segoe UI");
+    SendMessage(g.form_edit, WM_SETFONT, (WPARAM)ui_font, TRUE);
+
+    /* Subclass to intercept Enter/Escape. */
+    g.form_edit_orig_proc = (WNDPROC)SetWindowLongPtrW(g.form_edit,
+        GWLP_WNDPROC, (LONG_PTR)FormEditProc);
+
+    g.form_edit_node = node;
+    SetFocus(g.form_edit);
+
+    /* Select all text. */
+    SendMessage(g.form_edit, EM_SETSEL, 0, -1);
+}
+
+/* ── Text selection helpers ────────────────────────────────────────── */
+
+static void clear_selection(void)
+{
+    g.sel.active = 0;
+    g.sel.has_sel = 0;
+    free(g.sel.text);
+    g.sel.text = NULL;
+    g.sel.text_len = 0;
+}
+
+/* Check if a text box overlaps the selection rectangle. */
+static int box_in_selection(const LayoutBox *box, float abs_x, float abs_y,
+                             float sel_top, float sel_bot,
+                             float sel_left, float sel_right)
+{
+    float bx = abs_x;
+    float by = abs_y;
+    float bx2 = bx + box->rect.width;
+    float by2 = by + box->rect.height;
+
+    /* Box must overlap vertical range. */
+    if (by2 < sel_top || by > sel_bot) return 0;
+
+    /* For single-line selection (start_y ~ end_y), check horizontal too. */
+    if (sel_bot - sel_top < 30) {
+        if (bx2 < sel_left || bx > sel_right) return 0;
+    }
+
+    return 1;
+}
+
+/* Recursively collect text from boxes within the selection region. */
+static void collect_text_recursive(const LayoutBox *box, float ox, float oy,
+                                    float sel_top, float sel_bot,
+                                    float sel_left, float sel_right,
+                                    char **buf, size_t *len, size_t *cap)
+{
+    if (!box) return;
+    if (box->style && box->style->display == DISPLAY_NONE) return;
+
+    float x = ox + box->rect.x;
+    float y = oy + box->rect.y;
+
+    if (box->type == BOX_TEXT && box->text && box->text_len > 0) {
+        if (box_in_selection(box, x, y, sel_top, sel_bot, sel_left, sel_right)) {
+            /* Append text. */
+            size_t needed = *len + box->text_len + 2;
+            if (needed > *cap) {
+                while (needed > *cap) *cap *= 2;
+                *buf = realloc(*buf, *cap);
+            }
+            if (*len > 0 && (*buf)[*len - 1] != ' ' && (*buf)[*len - 1] != '\n')
+                (*buf)[(*len)++] = ' ';
+            memcpy(*buf + *len, box->text, box->text_len);
+            *len += box->text_len;
+            (*buf)[*len] = '\0';
+        }
+    }
+
+    for (LayoutBox *child = box->first_child; child; child = child->next_sibling)
+        collect_text_recursive(child, x, y, sel_top, sel_bot,
+                                sel_left, sel_right, buf, len, cap);
+}
+
+static void collect_selected_text(void)
+{
+    free(g.sel.text);
+    g.sel.text = NULL;
+    g.sel.text_len = 0;
+
+    if (!g.has_content || !g.result.layout_tree || !g.result.layout_tree->root)
+        return;
+
+    float top = g.sel.start_y < g.sel.end_y ? g.sel.start_y : g.sel.end_y;
+    float bot = g.sel.start_y > g.sel.end_y ? g.sel.start_y : g.sel.end_y;
+    float left = g.sel.start_x < g.sel.end_x ? g.sel.start_x : g.sel.end_x;
+    float right = g.sel.start_x > g.sel.end_x ? g.sel.start_x : g.sel.end_x;
+
+    /* Expand vertical range to cover line heights. */
+    bot += 20;
+
+    size_t cap = 1024;
+    size_t len = 0;
+    char *buf = malloc(cap);
+    buf[0] = '\0';
+
+    collect_text_recursive(g.result.layout_tree->root, 0, 0,
+                            top, bot, left, right, &buf, &len, &cap);
+
+    g.sel.text = buf;
+    g.sel.text_len = len;
+}
+
+static void copy_selection_to_clipboard(void)
+{
+    if (!g.sel.text || g.sel.text_len == 0) return;
+
+    /* Convert to wide string. */
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, g.sel.text,
+                                    (int)g.sel.text_len, NULL, 0);
+    if (wlen <= 0) return;
+
+    if (!OpenClipboard(g.hwnd)) return;
+    EmptyClipboard();
+
+    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, (wlen + 1) * sizeof(wchar_t));
+    if (hMem) {
+        wchar_t *dst = (wchar_t *)GlobalLock(hMem);
+        MultiByteToWideChar(CP_UTF8, 0, g.sel.text, (int)g.sel.text_len,
+                            dst, wlen);
+        dst[wlen] = L'\0';
+        GlobalUnlock(hMem);
+        SetClipboardData(CF_UNICODETEXT, hMem);
+    }
+    CloseClipboard();
+    set_status("Copied to clipboard");
+}
+
+/* Paint selection highlight over text boxes in the selection region. */
+static void paint_selection(HDC hdc, const LayoutBox *box, float ox, float oy)
+{
+    if (!box || !g.sel.has_sel) return;
+    if (box->style && box->style->display == DISPLAY_NONE) return;
+
+    float x = ox + box->rect.x;
+    float y = oy + box->rect.y;
+
+    float top = g.sel.start_y < g.sel.end_y ? g.sel.start_y : g.sel.end_y;
+    float bot = g.sel.start_y > g.sel.end_y ? g.sel.start_y : g.sel.end_y;
+    float left = g.sel.start_x < g.sel.end_x ? g.sel.start_x : g.sel.end_x;
+    float right = g.sel.start_x > g.sel.end_x ? g.sel.start_x : g.sel.end_x;
+    bot += 20;
+
+    if (box->type == BOX_TEXT && box->text && box->text_len > 0) {
+        float screen_y = y - g.scroll_y;
+        if (box_in_selection(box, x, y, top, bot, left, right)) {
+            RECT hl;
+            hl.left   = (int)x;
+            hl.top    = (int)screen_y;
+            hl.right  = (int)(x + box->rect.width);
+            hl.bottom = (int)(screen_y + box->rect.height);
+
+            HBRUSH sel_brush = CreateSolidBrush(RGB(51, 153, 255));
+            FillRect(hdc, &hl, sel_brush);
+            DeleteObject(sel_brush);
+        }
+    }
+
+    for (LayoutBox *child = box->first_child; child; child = child->next_sibling)
+        paint_selection(hdc, child, x, y);
+}
+
 /* ── Navigation button state ───────────────────────────────────────── */
 
 static void update_nav_buttons(void)
@@ -273,6 +627,10 @@ static void update_nav_buttons(void)
 
 static void load_page(const char *html, size_t len)
 {
+    dismiss_form_edit();
+    clear_selection();
+    clear_form_values();
+
     if (g.has_content) {
         pane_result_free(&g.result);
         g.has_content = 0;
@@ -472,8 +830,12 @@ static void handle_form_submit(const DomNode *form_node)
                 continue;
         }
 
-        const char *val = elem_get_attr(n, "value");
-        if (!val) val = "";
+        /* Use stored form value if available, otherwise fall back to attr. */
+        const char *val = get_form_value(n);
+        if (!val) {
+            val = elem_get_attr(n, "value");
+            if (!val) val = "";
+        }
 
         if (qlen > 0 && qlen < sizeof(query) - 1)
             query[qlen++] = '&';
@@ -602,12 +964,17 @@ static void handle_content_click(int mx, int my)
 
     const LayoutBox *hit = hit_test_box(g.result.layout_tree->root,
                                          px, py, 0, 0);
-    if (!hit) return;
+    if (!hit) {
+        dismiss_form_edit();
+        clear_selection();
+        return;
+    }
 
     /* Check for form elements first (higher priority than links). */
     const DomNode *form_node = find_form_element(hit);
     if (form_node) {
         if (is_button_element(form_node)) {
+            dismiss_form_edit();
             /* Handle button/submit click. */
             const char *type = NULL;
             if (form_node->elem.tag == TAG_INPUT)
@@ -630,10 +997,17 @@ static void handle_content_click(int mx, int my)
             return;
         }
         if (is_text_input(form_node)) {
-            set_status("Text input clicked (editing not yet supported)");
+            const LayoutBox *form_box = find_box_for_node(
+                g.result.layout_tree->root, form_node);
+            if (form_box) {
+                spawn_form_edit(form_node, form_box);
+            }
             return;
         }
     }
+
+    /* Dismiss form edit when clicking elsewhere. */
+    dismiss_form_edit();
 
     /* Check for link. */
     const DomNode *link_node = find_link_ancestor(hit);
@@ -823,6 +1197,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
             /* Offset for toolbar. */
             SetViewportOrgEx(hdc, 0, TOOLBAR_HEIGHT, NULL);
+
+            /* Paint selection highlight behind text. */
+            if (g.sel.has_sel)
+                paint_selection(hdc, g.result.layout_tree->root, 0, 0);
+
             paint_box_gdi(hdc, g.result.layout_tree->root, 0, 0);
             SetViewportOrgEx(hdc, 0, 0, NULL);
 
@@ -852,6 +1231,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         float max_scroll = g.content_height - g.viewport_h;
         if (max_scroll < 0) max_scroll = 0;
         if (g.scroll_y > max_scroll) g.scroll_y = max_scroll;
+
+        /* Dismiss form edit on scroll (position would be stale). */
+        dismiss_form_edit();
+
         InvalidateRect(hwnd, NULL, TRUE);
         return 0;
     }
@@ -862,7 +1245,38 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
         /* Only handle clicks in content area (below toolbar, above status). */
         if (my >= TOOLBAR_HEIGHT) {
-            handle_content_click(mx, my);
+            /* Convert to page coordinates for selection. */
+            float px = (float)mx;
+            float py = (float)(my - TOOLBAR_HEIGHT) + g.scroll_y;
+
+            /* Check if clicking on a form element or link. */
+            int is_interactive = 0;
+            if (g.has_content && g.result.layout_tree && g.result.layout_tree->root) {
+                const LayoutBox *hit = hit_test_box(g.result.layout_tree->root,
+                                                     px, py, 0, 0);
+                if (hit) {
+                    const DomNode *form_node = find_form_element(hit);
+                    if (form_node && (is_text_input(form_node) || is_button_element(form_node)))
+                        is_interactive = 1;
+                    if (!is_interactive && find_link_ancestor(hit))
+                        is_interactive = 1;
+                }
+            }
+
+            if (is_interactive) {
+                clear_selection();
+                handle_content_click(mx, my);
+            } else {
+                /* Start text selection. */
+                clear_selection();
+                g.sel.active = 1;
+                g.sel.start_x = px;
+                g.sel.start_y = py;
+                g.sel.end_x = px;
+                g.sel.end_y = py;
+                SetCapture(hwnd);
+                dismiss_form_edit();
+            }
         }
         return 0;
     }
@@ -870,8 +1284,47 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     case WM_MOUSEMOVE: {
         int mx = GET_X_LPARAM(lParam);
         int my = GET_Y_LPARAM(lParam);
+
+        /* Update text selection if dragging. */
+        if (g.sel.active) {
+            g.sel.end_x = (float)mx;
+            g.sel.end_y = (float)(my - TOOLBAR_HEIGHT) + g.scroll_y;
+            g.sel.has_sel = 1;
+            InvalidateRect(hwnd, NULL, TRUE);
+        }
+
         handle_content_mousemove(mx, my);
         SetCursor(g.current_cursor);
+        return 0;
+    }
+
+    case WM_LBUTTONUP: {
+        if (g.sel.active) {
+            int mx = GET_X_LPARAM(lParam);
+            int my = GET_Y_LPARAM(lParam);
+            g.sel.end_x = (float)mx;
+            g.sel.end_y = (float)(my - TOOLBAR_HEIGHT) + g.scroll_y;
+            g.sel.active = 0;
+            ReleaseCapture();
+
+            /* Only keep selection if mouse moved enough. */
+            float dx = g.sel.end_x - g.sel.start_x;
+            float dy = g.sel.end_y - g.sel.start_y;
+            if (dx * dx + dy * dy > 25) {
+                g.sel.has_sel = 1;
+                collect_selected_text();
+                if (g.sel.text_len > 0) {
+                    char status[128];
+                    snprintf(status, sizeof(status),
+                             "Selected %zu chars (Ctrl+C to copy)",
+                             g.sel.text_len);
+                    set_status(status);
+                }
+                InvalidateRect(hwnd, NULL, TRUE);
+            } else {
+                clear_selection();
+            }
+        }
         return 0;
     }
 
@@ -886,6 +1339,34 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     case WM_KEYDOWN: {
         int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
         int alt  = (GetKeyState(VK_MENU)    & 0x8000) != 0;
+
+        /* Ctrl+C: Copy selection to clipboard. */
+        if (ctrl && wParam == 'C' && g.sel.has_sel && g.sel.text_len > 0) {
+            copy_selection_to_clipboard();
+            return 0;
+        }
+
+        /* Ctrl+A: Select all text on the page. */
+        if (ctrl && wParam == 'A' && GetFocus() != g.url_entry && !g.form_edit) {
+            if (g.has_content && g.result.layout_tree && g.result.layout_tree->root) {
+                g.sel.start_x = 0;
+                g.sel.start_y = 0;
+                g.sel.end_x = g.viewport_w;
+                g.sel.end_y = g.content_height;
+                g.sel.has_sel = 1;
+                g.sel.active = 0;
+                collect_selected_text();
+                InvalidateRect(hwnd, NULL, TRUE);
+                if (g.sel.text_len > 0) {
+                    char status[128];
+                    snprintf(status, sizeof(status),
+                             "Selected all (%zu chars, Ctrl+C to copy)",
+                             g.sel.text_len);
+                    set_status(status);
+                }
+            }
+            return 0;
+        }
 
         /* Ctrl+L: Focus URL bar. */
         if (ctrl && wParam == 'L') {
@@ -997,7 +1478,22 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         return 0;
     }
 
+    /* Async dismiss of form edit (posted from WM_KILLFOCUS handler). */
+    case WM_APP + 1: {
+        if (g.form_edit) {
+            HWND edit = g.form_edit;
+            g.form_edit = NULL;
+            g.form_edit_node = NULL;
+            g.form_edit_orig_proc = NULL;
+            DestroyWindow(edit);
+        }
+        return 0;
+    }
+
     case WM_DESTROY:
+        dismiss_form_edit();
+        clear_selection();
+        clear_form_values();
         if (g.has_content) pane_result_free(&g.result);
         free_history();
         PostQuitMessage(0);
@@ -1064,6 +1560,14 @@ int win32_browser_run(int argc, char **argv)
             GetWindowTextA(g.url_entry, url, MAX_URL);
             navigate(url);
             SetFocus(g.hwnd);
+            continue;
+        }
+        /* Let IsDialogMessage handle Tab/Enter for child controls
+         * (form edit, URL bar) so keyboard input works properly. */
+        if (g.form_edit && IsWindow(g.form_edit) &&
+            msg.hwnd == g.form_edit) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
             continue;
         }
         TranslateMessage(&msg);
