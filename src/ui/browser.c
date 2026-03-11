@@ -467,7 +467,9 @@ static void browser_navigate_impl(BrowserWindow *bw, const char *url,
 
     /* Local file. */
     if (strncmp(url, "file://", 7) == 0 || url[0] == '/') {
-        const char *path = (strncmp(url, "file://", 7) == 0) ? url + 7 : url;
+        const char *path = url;
+        if (strncmp(url, "file:///", 8) == 0) path = url + 7; /* keep leading / */
+        else if (strncmp(url, "file://", 7) == 0) path = url + 7;
 
         FILE *f = fopen(path, "rb");
         if (!f) {
@@ -483,6 +485,15 @@ static void browser_navigate_impl(BrowserWindow *bw, const char *url,
         fseek(f, 0, SEEK_SET);
 
         char *buf = malloc(sz + 1);
+        if (!buf) {
+            fclose(f);
+            char err[4096];
+            snprintf(err, sizeof(err), ERROR_PAGE_FMT, url,
+                     "Out of memory.");
+            render_page(bw, err, strlen(err), "Error");
+            update_nav_buttons(bw);
+            return;
+        }
         fread(buf, 1, sz, f);
         buf[sz] = '\0';
         fclose(f);
@@ -548,6 +559,18 @@ static void browser_navigate_impl(BrowserWindow *bw, const char *url,
         }
 
         fetch_request_free(freq);
+
+        if (!resp) {
+            char err[4096];
+            snprintf(err, sizeof(err), ERROR_PAGE_FMT, url,
+                     "Connection failed (no response).");
+            if (push_history) tab_push_history(tab, url);
+            render_page(bw, err, strlen(err), "Error");
+            gtk_label_set_text(GTK_LABEL(bw->status_bar), "Connection failed");
+            gtk_entry_set_text(GTK_ENTRY(bw->url_entry), tab->url);
+            update_nav_buttons(bw);
+            return;
+        }
 
         if (resp->error) {
             char err[4096];
@@ -1358,8 +1381,8 @@ static gboolean on_content_motion(GtkWidget *widget, GdkEventMotion *event,
         gdk_window_set_cursor(win, NULL);
     }
 
-    if (status_text)
-        gtk_label_set_text(GTK_LABEL(bw->status_bar), status_text);
+    gtk_label_set_text(GTK_LABEL(bw->status_bar),
+                       status_text ? status_text : "");
 
     return FALSE;
 }

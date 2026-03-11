@@ -415,6 +415,9 @@ static void spawn_form_edit(const DomNode *node, const LayoutBox *box)
     int sw = (int)(box->rect.width + box->padding.left + box->padding.right);
     int sh = (int)(box->rect.height + box->padding.top + box->padding.bottom);
 
+    /* Clamp to visible area. */
+    if (sx < 0) { sw += sx; sx = 0; }
+    if (sy < TOOLBAR_HEIGHT) { sh += sy - TOOLBAR_HEIGHT; sy = TOOLBAR_HEIGHT; }
     if (sw < 40) sw = 40;
     if (sh < 20) sh = 20;
 
@@ -771,6 +774,15 @@ static void navigate_impl(const char *url, int push_hist)
 
         HttpResponse *resp = http_get(url, 5);
 
+        if (!resp) {
+            show_error(url, "Connection failed (no response).");
+            if (push_hist) push_history(url);
+            set_status("Connection failed");
+            SetWindowTextA(g.url_entry, g.current_url);
+            update_nav_buttons();
+            return;
+        }
+
         if (resp->error) {
             show_error(url, resp->error);
             if (push_hist) push_history(url);
@@ -892,13 +904,15 @@ static void paint_box_gdi(HDC hdc, const LayoutBox *box, float ox, float oy)
     if (box->style && box->style->display == DISPLAY_NONE) return;
 
     ComputedStyle *s = box->style;
+    /* ox/oy are page-space accumulators; subtract scroll only for drawing. */
     float x = ox + box->rect.x;
-    float y = oy + box->rect.y - g.scroll_y;
+    float y = oy + box->rect.y;
+    float sy = y - g.scroll_y; /* screen-space y for drawing */
 
     /* Background. */
     if (s && s->background_color.a > 0) {
         float bx = x - box->padding.left - box->border.left;
-        float by = y - box->padding.top - box->border.top;
+        float by = sy - box->padding.top - box->border.top;
         float bw = box->border.left + box->padding.left + box->rect.width +
                    box->padding.right + box->border.right;
         float bh = box->border.top + box->padding.top + box->rect.height +
@@ -914,7 +928,7 @@ static void paint_box_gdi(HDC hdc, const LayoutBox *box, float ox, float oy)
     /* Borders. */
     if (s && (box->border.top > 0 || box->border.left > 0)) {
         float bx = x - box->padding.left - box->border.left;
-        float by = y - box->padding.top - box->border.top;
+        float by = sy - box->padding.top - box->border.top;
         float bw = box->border.left + box->padding.left + box->rect.width +
                    box->padding.right + box->border.right;
         float bh = box->border.top + box->padding.top + box->rect.height +
@@ -947,13 +961,13 @@ static void paint_box_gdi(HDC hdc, const LayoutBox *box, float ox, float oy)
         if (wtext) {
             MultiByteToWideChar(CP_UTF8, 0, box->text, (int)box->text_len, wtext, wlen);
 
-            /* Use DrawTextW with word wrapping within the box content width. */
+            /* Draw text without DT_WORDBREAK — layout engine already handles wrapping. */
             RECT text_rc;
             text_rc.left   = (int)x;
-            text_rc.top    = (int)y;
+            text_rc.top    = (int)sy;
             text_rc.right  = (int)(x + box->rect.width);
-            text_rc.bottom = (int)(y + box->rect.height);
-            DrawTextW(hdc, wtext, wlen, &text_rc, DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+            text_rc.bottom = (int)(sy + box->rect.height);
+            DrawTextW(hdc, wtext, wlen, &text_rc, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_NOCLIP);
 
             free(wtext);
         }
@@ -962,9 +976,9 @@ static void paint_box_gdi(HDC hdc, const LayoutBox *box, float ox, float oy)
         DeleteObject(hfont);
     }
 
-    /* Children. */
+    /* Children — pass page-space coordinates. */
     for (LayoutBox *child = box->first_child; child; child = child->next_sibling) {
-        paint_box_gdi(hdc, child, x, oy + box->rect.y);
+        paint_box_gdi(hdc, child, x, y);
     }
 }
 
