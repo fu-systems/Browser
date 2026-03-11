@@ -60,6 +60,16 @@ typedef struct {
     FormFieldValue  form_values[MAX_FORM_VALUES];
     int             form_value_count;
 
+    /* Text selection state. */
+    int          sel_active;    /* currently dragging */
+    int          sel_has;       /* selection exists */
+    float        sel_start_x;  /* page coordinates */
+    float        sel_start_y;
+    float        sel_end_x;
+    float        sel_end_y;
+    char        *sel_text;     /* collected selected text */
+    size_t       sel_text_len;
+
     /* Tab widget (label in tab bar). */
     GtkWidget   *tab_label;
     GtkWidget   *tab_button;   /* close button */

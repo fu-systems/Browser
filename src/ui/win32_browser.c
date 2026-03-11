@@ -456,6 +456,19 @@ static void spawn_form_edit(const DomNode *node, const LayoutBox *box)
         GWLP_WNDPROC, (LONG_PTR)FormEditProc);
 
     g.form_edit_node = node;
+
+    /* Set placeholder text if available. */
+    const char *placeholder = elem_get_attr(node, "placeholder");
+    if (placeholder && placeholder[0]) {
+        int wlen = MultiByteToWideChar(CP_UTF8, 0, placeholder, -1, NULL, 0);
+        wchar_t *wph = (wchar_t *)malloc(wlen * sizeof(wchar_t));
+        if (wph) {
+            MultiByteToWideChar(CP_UTF8, 0, placeholder, -1, wph, wlen);
+            SendMessageW(g.form_edit, EM_SETCUEBANNER, TRUE, (LPARAM)wph);
+            free(wph);
+        }
+    }
+
     SetFocus(g.form_edit);
 
     /* Select all text. */
@@ -651,7 +664,11 @@ static void load_page(const char *html, size_t len)
 
     if (g.result.layout_tree && g.result.layout_tree->root) {
         LayoutBox *r = g.result.layout_tree->root;
-        g.content_height = r->rect.y + r->rect.height + r->margin.bottom + 40;
+        g.content_height = r->rect.y + r->rect.height +
+                           r->padding.bottom + r->border.bottom +
+                           r->margin.bottom;
+        if (g.content_height < g.viewport_h)
+            g.content_height = g.viewport_h;
     }
 
     InvalidateRect(g.hwnd, NULL, TRUE);
@@ -991,6 +1008,11 @@ static void handle_content_click(int mx, int my)
                 } else {
                     set_status("Submit button: no parent form found");
                 }
+            } else if (type && strcmp(type, "reset") == 0) {
+                /* Clear all form values and redraw. */
+                clear_form_values();
+                set_status("Form reset");
+                InvalidateRect(g.hwnd, NULL, TRUE);
             } else {
                 set_status("Button clicked");
             }

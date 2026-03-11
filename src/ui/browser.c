@@ -95,6 +95,118 @@ static void tab_set_form_value(BrowserTab *tab, const DomNode *node,
 
 /* Form element detection: now in browser_common.c */
 
+/* ── Text selection helpers ────────────────────────────────────────── */
+
+static void tab_clear_selection(BrowserTab *tab)
+{
+    tab->sel_active = 0;
+    tab->sel_has = 0;
+    free(tab->sel_text);
+    tab->sel_text = NULL;
+    tab->sel_text_len = 0;
+}
+
+/* Check if a text box overlaps the selection rectangle. */
+static int box_in_selection(const LayoutBox *box, float abs_x, float abs_y,
+                             float sel_top, float sel_bot,
+                             float sel_left, float sel_right)
+{
+    float bx = abs_x, by = abs_y;
+    float bx2 = bx + box->rect.width;
+    float by2 = by + box->rect.height;
+
+    if (by2 < sel_top || by > sel_bot) return 0;
+    if (sel_bot - sel_top < 30) {
+        if (bx2 < sel_left || bx > sel_right) return 0;
+    }
+    return 1;
+}
+
+/* Recursively collect text from boxes within the selection region. */
+static void collect_text_recursive(const LayoutBox *box, float ox, float oy,
+                                    float sel_top, float sel_bot,
+                                    float sel_left, float sel_right,
+                                    char **buf, size_t *len, size_t *cap)
+{
+    if (!box) return;
+    if (box->style && box->style->display == DISPLAY_NONE) return;
+
+    float x = ox + box->rect.x;
+    float y = oy + box->rect.y;
+
+    if (box->type == BOX_TEXT && box->text && box->text_len > 0) {
+        if (box_in_selection(box, x, y, sel_top, sel_bot, sel_left, sel_right)) {
+            size_t needed = *len + box->text_len + 2;
+            if (needed > *cap) {
+                while (needed > *cap) *cap *= 2;
+                *buf = realloc(*buf, *cap);
+            }
+            if (*len > 0 && (*buf)[*len - 1] != ' ' && (*buf)[*len - 1] != '\n')
+                (*buf)[(*len)++] = ' ';
+            memcpy(*buf + *len, box->text, box->text_len);
+            *len += box->text_len;
+            (*buf)[*len] = '\0';
+        }
+    }
+
+    for (LayoutBox *child = box->first_child; child; child = child->next_sibling)
+        collect_text_recursive(child, x, y, sel_top, sel_bot,
+                                sel_left, sel_right, buf, len, cap);
+}
+
+static void tab_collect_selected_text(BrowserTab *tab)
+{
+    free(tab->sel_text);
+    tab->sel_text = NULL;
+    tab->sel_text_len = 0;
+
+    if (!tab->has_content || !tab->result.layout_tree ||
+        !tab->result.layout_tree->root)
+        return;
+
+    float top  = tab->sel_start_y < tab->sel_end_y ? tab->sel_start_y : tab->sel_end_y;
+    float bot  = tab->sel_start_y > tab->sel_end_y ? tab->sel_start_y : tab->sel_end_y;
+    float left = tab->sel_start_x < tab->sel_end_x ? tab->sel_start_x : tab->sel_end_x;
+    float right= tab->sel_start_x > tab->sel_end_x ? tab->sel_start_x : tab->sel_end_x;
+    bot += 20;
+
+    size_t cap = 1024, len = 0;
+    char *buf = malloc(cap);
+    buf[0] = '\0';
+
+    collect_text_recursive(tab->result.layout_tree->root, 0, 0,
+                            top, bot, left, right, &buf, &len, &cap);
+
+    tab->sel_text = buf;
+    tab->sel_text_len = len;
+}
+
+/* Paint selection highlight over text boxes in selection region. */
+static void paint_selection_highlight(cairo_t *cr, const LayoutBox *box,
+                                       float ox, float oy, float scroll_y,
+                                       float sel_top, float sel_bot,
+                                       float sel_left, float sel_right)
+{
+    if (!box) return;
+    if (box->style && box->style->display == DISPLAY_NONE) return;
+
+    float x = ox + box->rect.x;
+    float y = oy + box->rect.y;
+
+    if (box->type == BOX_TEXT && box->text && box->text_len > 0) {
+        if (box_in_selection(box, x, y, sel_top, sel_bot, sel_left, sel_right)) {
+            float sy = y - scroll_y;
+            cairo_set_source_rgba(cr, 0.2, 0.6, 1.0, 0.3);
+            cairo_rectangle(cr, x, sy, box->rect.width, box->rect.height);
+            cairo_fill(cr);
+        }
+    }
+
+    for (LayoutBox *child = box->first_child; child; child = child->next_sibling)
+        paint_selection_highlight(cr, child, x, y, scroll_y,
+                                   sel_top, sel_bot, sel_left, sel_right);
+}
+
 /* ── Default pages ─────────────────────────────────────────────────── */
 
 static const char *HOME_PAGE =
@@ -186,6 +298,7 @@ static void tab_free_content(BrowserTab *tab)
         tab->has_content = false;
     }
     tab_clear_form_values(tab);
+    tab_clear_selection(tab);
 }
 
 static void tab_free_history(BrowserTab *tab)
@@ -704,6 +817,18 @@ static gboolean on_draw(GtkWidget *widget, cairo_t *cr, gpointer data)
 
     /* Render the page. */
     if (tab->result.layout_tree && tab->result.layout_tree->root) {
+        /* Paint selection highlight behind text. */
+        if (tab->sel_has) {
+            float top  = tab->sel_start_y < tab->sel_end_y ? tab->sel_start_y : tab->sel_end_y;
+            float bot  = tab->sel_start_y > tab->sel_end_y ? tab->sel_start_y : tab->sel_end_y;
+            float left = tab->sel_start_x < tab->sel_end_x ? tab->sel_start_x : tab->sel_end_x;
+            float right= tab->sel_start_x > tab->sel_end_x ? tab->sel_start_x : tab->sel_end_x;
+            bot += 20;
+            paint_selection_highlight(cr, tab->result.layout_tree->root,
+                                       0, 0, tab->scroll_y,
+                                       top, bot, left, right);
+        }
+
         CairoRenderer renderer;
         cairo_renderer_init(&renderer, cr, 16.0f);
         renderer.scroll_x = tab->scroll_x;
@@ -797,15 +922,13 @@ static void on_form_entry_activate(GtkWidget *widget, gpointer data)
                     if (!val) val = "";
                 }
 
-                /* Skip submit buttons that aren't the one clicked. */
+                /* Skip non-submittable input types. */
                 if (n->elem.tag == TAG_INPUT) {
                     const char *itype = elem_get_attr(n, "type");
                     if (itype && (strcmp(itype, "submit") == 0 ||
-                                  strcmp(itype, "button") == 0))
+                                  strcmp(itype, "button") == 0 ||
+                                  strcmp(itype, "reset") == 0))
                         continue;
-                    if (itype && strcmp(itype, "hidden") == 0) {
-                        /* Include hidden fields. */
-                    }
                 }
 
                 if (qlen > 0 && qlen < sizeof(query) - 1)
@@ -1066,7 +1189,7 @@ static void handle_button_click(BrowserWindow *bw, const DomNode *node)
     }
 }
 
-/* Content area click handler. */
+/* Content area button-press handler (click + text selection start). */
 static gboolean on_content_click(GtkWidget *widget, GdkEventButton *event,
                                   gpointer data)
 {
@@ -1084,49 +1207,100 @@ static gboolean on_content_click(GtkWidget *widget, GdkEventButton *event,
 
     const LayoutBox *hit = hit_test_box(tab->result.layout_tree->root,
                                          px, py, 0, 0);
-    if (!hit) {
+
+    /* Check if clicking on an interactive element (form/link). */
+    int is_interactive = 0;
+    if (hit) {
+        const DomNode *form_node = find_form_element(hit);
+        if (form_node && (is_text_input(form_node) || is_button_element(form_node)))
+            is_interactive = 1;
+        if (!is_interactive && find_link_ancestor(hit))
+            is_interactive = 1;
+    }
+
+    if (is_interactive && hit) {
+        tab_clear_selection(tab);
+
+        const DomNode *form_node = find_form_element(hit);
+        if (form_node) {
+            if (is_text_input(form_node)) {
+                const LayoutBox *form_box = find_box_for_node(
+                    tab->result.layout_tree->root, form_node);
+                if (form_box)
+                    spawn_form_widget(bw, form_node, form_box);
+                return TRUE;
+            } else if (is_button_element(form_node)) {
+                dismiss_form_widget(bw);
+                handle_button_click(bw, form_node);
+                return TRUE;
+            }
+        }
+
         dismiss_form_widget(bw);
+
+        const DomNode *link_node = find_link_ancestor(hit);
+        if (link_node) {
+            const char *href = elem_get_attr(link_node, "href");
+            if (href && href[0]) {
+                char resolved[2048];
+                resolve_url(tab->url, href, resolved, sizeof(resolved));
+                if (resolved[0]) {
+                    browser_navigate(bw, resolved);
+                    return TRUE;
+                }
+            }
+        }
         return FALSE;
     }
 
-    /* Check if we hit a form element first (higher priority than links). */
-    const DomNode *form_node = find_form_element(hit);
-    if (form_node) {
-        if (is_text_input(form_node)) {
-            const LayoutBox *form_box = find_box_for_node(
-                tab->result.layout_tree->root, form_node);
-            if (form_box) {
-                spawn_form_widget(bw, form_node, form_box);
-                return TRUE;
-            }
-        } else if (is_button_element(form_node)) {
-            dismiss_form_widget(bw);
-            handle_button_click(bw, form_node);
-            return TRUE;
-        }
-    }
-
-    /* Dismiss any active form widget when clicking elsewhere. */
+    /* Non-interactive area: start text selection. */
+    tab_clear_selection(tab);
+    tab->sel_active = 1;
+    tab->sel_start_x = px;
+    tab->sel_start_y = py;
+    tab->sel_end_x = px;
+    tab->sel_end_y = py;
     dismiss_form_widget(bw);
-
-    /* Check if we hit a link. */
-    const DomNode *link_node = find_link_ancestor(hit);
-    if (link_node) {
-        const char *href = elem_get_attr(link_node, "href");
-        if (href && href[0]) {
-            char resolved[2048];
-            resolve_url(tab->url, href, resolved, sizeof(resolved));
-            if (resolved[0]) {
-                browser_navigate(bw, resolved);
-                return TRUE;
-            }
-        }
-    }
 
     return FALSE;
 }
 
-/* Content area mouse motion handler — change cursor over links. */
+/* Content area button-release handler (end text selection). */
+static gboolean on_content_release(GtkWidget *widget, GdkEventButton *event,
+                                    gpointer data)
+{
+    BrowserWindow *bw = data;
+    BrowserTab *tab = active(bw);
+    if (!tab || event->button != 1) return FALSE;
+
+    if (tab->sel_active) {
+        float px = (float)event->x + tab->scroll_x;
+        float py = (float)event->y + tab->scroll_y;
+        tab->sel_end_x = px;
+        tab->sel_end_y = py;
+        tab->sel_active = 0;
+
+        float dx = tab->sel_end_x - tab->sel_start_x;
+        float dy = tab->sel_end_y - tab->sel_start_y;
+        if (dx * dx + dy * dy > 25) {
+            tab->sel_has = 1;
+            tab_collect_selected_text(tab);
+            if (tab->sel_text_len > 0) {
+                char status[128];
+                snprintf(status, sizeof(status),
+                         "Selected %zu chars (Ctrl+C to copy)",
+                         tab->sel_text_len);
+                gtk_label_set_text(GTK_LABEL(bw->status_bar), status);
+            }
+            redraw_content(bw);
+        } else {
+            tab_clear_selection(tab);
+        }
+    }
+    return FALSE;
+}
+
+/* Content area mouse motion handler — change cursor over links + selection. */
 static gboolean on_content_motion(GtkWidget *widget, GdkEventMotion *event,
                                    gpointer data)
 {
@@ -1134,11 +1308,19 @@ static gboolean on_content_motion(GtkWidget *widget, GdkEventMotion *event,
     BrowserTab *tab = active(bw);
     if (!tab || !tab->has_content) return FALSE;
 
-    if (!tab->result.layout_tree || !tab->result.layout_tree->root)
-        return FALSE;
-
     float px = (float)event->x + tab->scroll_x;
     float py = (float)event->y + tab->scroll_y;
+
+    /* Update text selection if dragging. */
+    if (tab->sel_active) {
+        tab->sel_end_x = px;
+        tab->sel_end_y = py;
+        tab->sel_has = 1;
+        redraw_content(bw);
+    }
+
+    if (!tab->result.layout_tree || !tab->result.layout_tree->root)
+        return FALSE;
 
     const LayoutBox *hit = hit_test_box(tab->result.layout_tree->root,
                                          px, py, 0, 0);
@@ -1244,6 +1426,41 @@ static gboolean on_key_press(GtkWidget *widget, GdkEventKey *event,
     guint key = event->keyval;
     guint mods = event->state & gtk_accelerator_get_default_mod_mask();
 
+    /* Ctrl+C: Copy selection to clipboard. */
+    if (mods == GDK_CONTROL_MASK && key == GDK_KEY_c &&
+        !gtk_widget_has_focus(bw->url_entry)) {
+        if (tab && tab->sel_has && tab->sel_text && tab->sel_text_len > 0) {
+            GtkClipboard *clip = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
+            gtk_clipboard_set_text(clip, tab->sel_text, (gint)tab->sel_text_len);
+            gtk_label_set_text(GTK_LABEL(bw->status_bar), "Copied to clipboard");
+            return TRUE;
+        }
+    }
+
+    /* Ctrl+A: Select all text on page. */
+    if (mods == GDK_CONTROL_MASK && key == GDK_KEY_a &&
+        !gtk_widget_has_focus(bw->url_entry)) {
+        if (tab && tab->has_content && tab->result.layout_tree &&
+            tab->result.layout_tree->root) {
+            tab->sel_start_x = 0;
+            tab->sel_start_y = 0;
+            tab->sel_end_x = bw->viewport_width;
+            tab->sel_end_y = tab->content_height;
+            tab->sel_has = 1;
+            tab->sel_active = 0;
+            tab_collect_selected_text(tab);
+            redraw_content(bw);
+            if (tab->sel_text_len > 0) {
+                char status[128];
+                snprintf(status, sizeof(status),
+                         "Selected all (%zu chars, Ctrl+C to copy)",
+                         tab->sel_text_len);
+                gtk_label_set_text(GTK_LABEL(bw->status_bar), status);
+            }
+            return TRUE;
+        }
+    }
+
     /* Ctrl+T: New tab. */
     if (mods == GDK_CONTROL_MASK && key == GDK_KEY_t) {
         int idx = browser_add_tab(bw);
@@ -1305,6 +1522,17 @@ static gboolean on_key_press(GtkWidget *widget, GdkEventKey *event,
         (mods == GDK_CONTROL_MASK && key == GDK_KEY_Page_Up)) {
         int prev = (bw->active_tab - 1 + bw->tab_count) % bw->tab_count;
         browser_switch_tab(bw, prev);
+        return TRUE;
+    }
+
+    /* Backspace: Back (when not in URL bar). */
+    if (key == GDK_KEY_BackSpace && !gtk_widget_has_focus(bw->url_entry)) {
+        if (tab && tab->history_pos > 0) {
+            tab->history_pos--;
+            browser_navigate_impl(bw, tab->history[tab->history_pos], false);
+            gtk_entry_set_text(GTK_ENTRY(bw->url_entry), tab->url);
+            update_nav_buttons(bw);
+        }
         return TRUE;
     }
 
@@ -1715,6 +1943,8 @@ BrowserWindow *browser_window_new(void)
                      G_CALLBACK(on_scroll_event), bw);
     g_signal_connect(bw->content_area, "button-press-event",
                      G_CALLBACK(on_content_click), bw);
+    g_signal_connect(bw->content_area, "button-release-event",
+                     G_CALLBACK(on_content_release), bw);
     g_signal_connect(bw->content_area, "motion-notify-event",
                      G_CALLBACK(on_content_motion), bw);
     g_signal_connect(bw->content_area, "size-allocate",
