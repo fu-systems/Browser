@@ -154,10 +154,30 @@ int main(int argc, char **argv)
         }
         fseek(f, 0, SEEK_END);
         long sz = ftell(f);
-        fseek(f, 0, SEEK_SET);
-        file_buf = malloc(sz + 1);
-        fread(file_buf, 1, sz, f);
-        file_buf[sz] = '\0';
+        if (sz < 0) {
+            /* Non-seekable stream (stdin/pipe): read in chunks. */
+            size_t cap = 16384, len = 0;
+            file_buf = malloc(cap);
+            if (!file_buf) { fclose(f); return 1; }
+            size_t n;
+            while ((n = fread(file_buf + len, 1, cap - len, f)) > 0) {
+                len += n;
+                if (len >= cap) {
+                    cap *= 2;
+                    char *tmp = realloc(file_buf, cap);
+                    if (!tmp) { free(file_buf); fclose(f); return 1; }
+                    file_buf = tmp;
+                }
+            }
+            file_buf[len] = '\0';
+            sz = (long)len;
+        } else {
+            fseek(f, 0, SEEK_SET);
+            file_buf = malloc(sz + 1);
+            if (!file_buf) { fclose(f); return 1; }
+            fread(file_buf, 1, sz, f);
+            file_buf[sz] = '\0';
+        }
         fclose(f);
         html = file_buf;
         html_len = sz;

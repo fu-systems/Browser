@@ -437,14 +437,16 @@ static LayoutBox *build_layout_box(Document *doc,
                 break;
             }
         }
-        if (all_ws && (parent_ctx->formatting_context == FC_BLOCK ||
-                       parent_ctx->formatting_context == FC_GRID ||
-                       parent_ctx->formatting_context == FC_FLEX ||
-                       parent_ctx->formatting_context == FC_TABLE))
+        if (parent_ctx && all_ws &&
+            (parent_ctx->formatting_context == FC_BLOCK ||
+             parent_ctx->formatting_context == FC_GRID ||
+             parent_ctx->formatting_context == FC_FLEX ||
+             parent_ctx->formatting_context == FC_TABLE))
             return NULL;
 
         ComputedStyle *text_style = computed_style_create(arena);
-        *text_style = *parent_style; /* inherit everything */
+        if (parent_style)
+            *text_style = *parent_style; /* inherit everything */
 
         LayoutBox *text_box = layout_box_create(arena, BOX_TEXT, node, text_style);
 

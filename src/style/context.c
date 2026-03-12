@@ -180,6 +180,12 @@ PairwiseContext context_transition(const PairwiseContext *parent_ctx,
     ctx.is_root = false;
     ctx.depth = parent_ctx->depth + 1;
 
+    /* Guard against NULL child_style. */
+    if (!child_style) return ctx;
+
+    /* Depth limit to prevent stack overflow on deeply nested DOM trees. */
+    if (ctx.depth > 512) return ctx;
+
     /* ── Inherited property propagation ──────────────────────────── */
 
     /* These flow from parent → child unless overridden by the child's style. */

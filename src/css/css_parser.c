@@ -340,6 +340,79 @@ CssValue css_parse_value_list(const char *input, size_t len, Arena *arena)
         case CSSTOK_PERCENTAGE:
             items[count++] = (CssValue){ .type = VAL_PERCENTAGE, .percentage = tok.num_value };
             break;
+        case CSSTOK_FUNCTION:
+            /* Handle repeat() function: repeat(<count>, <track-values>) */
+            if (str_eq_ci(tok.start, tok.len, "repeat")) {
+                /* The tokenizer already consumed the '(' for FUNCTION tokens. */
+                CssToken cnt_tok;
+                int rep_count = 0;
+                while (css_tokenizer_next(&t, &cnt_tok)) {
+                    if (cnt_tok.type == CSSTOK_WHITESPACE) continue;
+                    if (cnt_tok.type == CSSTOK_NUMBER) {
+                        rep_count = (int)cnt_tok.num_value;
+                        if (rep_count < 1) rep_count = 1;
+                        if (rep_count > 64) rep_count = 64;
+                    }
+                    break;
+                }
+                /* Skip comma. */
+                CssToken comma;
+                while (css_tokenizer_next(&t, &comma)) {
+                    if (comma.type == CSSTOK_WHITESPACE) continue;
+                    break; /* expect CSSTOK_COMMA */
+                }
+                /* Parse track value(s) until closing paren. */
+                CssValue track_vals[16];
+                int track_count = 0;
+                CssToken tv;
+                int paren_depth = 1;
+                while (paren_depth > 0 && css_tokenizer_next(&t, &tv)) {
+                    if (tv.type == CSSTOK_FUNCTION || tv.type == CSSTOK_LPAREN) { paren_depth++; continue; }
+                    if (tv.type == CSSTOK_RPAREN) { paren_depth--; if (paren_depth == 0) break; continue; }
+                    if (tv.type == CSSTOK_EOF) break;
+                    if (tv.type == CSSTOK_WHITESPACE) continue;
+                    if (track_count >= 16) continue;
+
+                    if (tv.type == CSSTOK_DIMENSION) {
+                        track_vals[track_count++] = (CssValue){
+                            .type = VAL_LENGTH,
+                            .length = { .magnitude = tv.num_value,
+                                        .unit = unit_from_name(tv.unit_start, tv.unit_len) },
+                        };
+                    } else if (tv.type == CSSTOK_PERCENTAGE) {
+                        track_vals[track_count++] = (CssValue){
+                            .type = VAL_PERCENTAGE, .percentage = tv.num_value };
+                    } else if (tv.type == CSSTOK_NUMBER) {
+                        track_vals[track_count++] = (CssValue){
+                            .type = VAL_NUMBER, .number = tv.num_value };
+                    } else if (tv.type == CSSTOK_IDENT) {
+                        if (str_eq_ci(tv.start, tv.len, "auto"))
+                            track_vals[track_count++] = css_value_auto;
+                        else
+                            track_vals[track_count++] = (CssValue){
+                                .type = VAL_KEYWORD,
+                                .string = arena_strndup(arena, tv.start, tv.len) };
+                    }
+                }
+                /* Expand: repeat N times. */
+                for (int r = 0; r < rep_count && count < 64; r++) {
+                    for (int tv_i = 0; tv_i < track_count && count < 64; tv_i++) {
+                        items[count++] = track_vals[tv_i];
+                    }
+                }
+                break;
+            }
+            /* Skip unrecognized CSS functions (e.g. minmax(), fit-content()). */
+            {
+                int fn_depth = 1;
+                CssToken fn_tok;
+                while (fn_depth > 0 && css_tokenizer_next(&t, &fn_tok)) {
+                    if (fn_tok.type == CSSTOK_FUNCTION || fn_tok.type == CSSTOK_LPAREN) fn_depth++;
+                    if (fn_tok.type == CSSTOK_RPAREN) fn_depth--;
+                    if (fn_tok.type == CSSTOK_EOF) break;
+                }
+            }
+            break;
         default:
             break;
         }
