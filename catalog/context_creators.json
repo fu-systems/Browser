@@ -1,0 +1,112 @@
+{
+  "_description": "Properties and elements that create new formatting contexts, stacking contexts, or containing blocks. These are the critical pairwise-transition-relevant properties — they change the context object as it propagates down the DOM tree.",
+
+  "formatting_context_creators": {
+    "_description": "These properties/values cause an element to establish a new block formatting context (BFC), flex formatting context, grid formatting context, or table formatting context. This is the most important context for pairwise transitions.",
+    "properties": [
+      {"property": "display", "trigger": "flex | inline-flex | grid | inline-grid | table | inline-table | flow-root", "context_type": "flex | grid | table | block (flow-root)"},
+      {"property": "position", "trigger": "absolute | fixed", "context_type": "block (new BFC)"},
+      {"property": "float", "trigger": "left | right | inline-start | inline-end", "context_type": "block (new BFC)"},
+      {"property": "overflow", "trigger": "hidden | scroll | auto (not visible)", "context_type": "block (new BFC)"},
+      {"property": "overflow-x", "trigger": "hidden | scroll | auto", "context_type": "block (new BFC)"},
+      {"property": "overflow-y", "trigger": "hidden | scroll | auto", "context_type": "block (new BFC)"},
+      {"property": "overflow-block", "trigger": "hidden | scroll | auto", "context_type": "block (new BFC)"},
+      {"property": "overflow-inline", "trigger": "hidden | scroll | auto", "context_type": "block (new BFC)"},
+      {"property": "contain", "trigger": "layout | paint | strict | content", "context_type": "block (new BFC)"},
+      {"property": "container-type", "trigger": "size | inline-size", "context_type": "block (new BFC)"},
+      {"property": "container", "trigger": "any non-normal type", "context_type": "block (new BFC)"},
+      {"property": "content-visibility", "trigger": "auto | hidden", "context_type": "block (new BFC)"},
+      {"property": "column-count", "trigger": "any integer value", "context_type": "multicol"},
+      {"property": "column-width", "trigger": "any length value", "context_type": "multicol"},
+      {"property": "columns", "trigger": "any non-auto value", "context_type": "multicol"}
+    ],
+    "elements": [
+      {"tag": "body", "reason": "root element establishes initial BFC"},
+      {"tag": "table", "reason": "establishes table formatting context"},
+      {"tag": "td", "reason": "table cells establish new BFC"},
+      {"tag": "th", "reason": "table header cells establish new BFC"},
+      {"tag": "iframe", "reason": "nested browsing context"},
+      {"tag": "svg", "reason": "SVG formatting context"},
+      {"tag": "math", "reason": "MathML formatting context"},
+      {"tag": "button", "reason": "establishes new BFC"},
+      {"tag": "input", "reason": "replaced element, establishes new BFC"},
+      {"tag": "select", "reason": "replaced element, establishes new BFC"},
+      {"tag": "textarea", "reason": "replaced element, establishes new BFC"},
+      {"tag": "fieldset", "reason": "establishes new BFC"},
+      {"tag": "dialog", "reason": "when open, establishes new BFC"},
+      {"tag": "frame", "reason": "deprecated, nested browsing context"},
+      {"tag": "frameset", "reason": "deprecated, frame container"}
+    ]
+  },
+
+  "stacking_context_creators": {
+    "_description": "These properties/values cause an element to establish a new stacking context, which affects z-ordering of descendants. Stacking context must be tracked in the pairwise context object.",
+    "properties": [
+      {"property": "position", "trigger": "relative | absolute | fixed | sticky (with z-index != auto)"},
+      {"property": "z-index", "trigger": "any integer value (on positioned or flex/grid item)"},
+      {"property": "opacity", "trigger": "< 1"},
+      {"property": "transform", "trigger": "any value other than none"},
+      {"property": "rotate", "trigger": "any value other than none"},
+      {"property": "scale", "trigger": "any value other than none"},
+      {"property": "translate", "trigger": "any value other than none"},
+      {"property": "filter", "trigger": "any value other than none"},
+      {"property": "backdrop-filter", "trigger": "any value other than none"},
+      {"property": "perspective", "trigger": "any value other than none"},
+      {"property": "transform-style", "trigger": "preserve-3d"},
+      {"property": "mix-blend-mode", "trigger": "any value other than normal"},
+      {"property": "isolation", "trigger": "isolate"},
+      {"property": "will-change", "trigger": "opacity | transform | filter | any property that creates stacking context"},
+      {"property": "contain", "trigger": "layout | paint | strict | content"},
+      {"property": "content-visibility", "trigger": "auto | hidden"},
+      {"property": "offset-path", "trigger": "any value other than none"},
+      {"property": "offset", "trigger": "any non-initial value"}
+    ]
+  },
+
+  "containing_block_creators": {
+    "_description": "These properties affect which element serves as the containing block for positioned descendants. The containing block determines percentage resolution for width/height/inset properties.",
+    "properties": [
+      {"property": "position", "trigger": "relative (for absolute descendants) | fixed (viewport) | absolute (for absolute descendants)", "containing_block_for": "absolutely positioned descendants"},
+      {"property": "transform", "trigger": "any value other than none", "containing_block_for": "fixed and absolutely positioned descendants"},
+      {"property": "perspective", "trigger": "any value other than none", "containing_block_for": "fixed and absolutely positioned descendants"},
+      {"property": "filter", "trigger": "any value other than none", "containing_block_for": "fixed and absolutely positioned descendants"},
+      {"property": "will-change", "trigger": "transform | perspective | filter", "containing_block_for": "fixed and absolutely positioned descendants"},
+      {"property": "contain", "trigger": "paint | layout | strict | content", "containing_block_for": "all descendants"},
+      {"property": "content-visibility", "trigger": "auto | hidden", "containing_block_for": "all descendants"},
+      {"property": "rotate", "trigger": "any value other than none", "containing_block_for": "fixed and absolutely positioned descendants"},
+      {"property": "scale", "trigger": "any value other than none", "containing_block_for": "fixed and absolutely positioned descendants"},
+      {"property": "translate", "trigger": "any value other than none", "containing_block_for": "fixed and absolutely positioned descendants"},
+      {"property": "offset-path", "trigger": "any value other than none", "containing_block_for": "fixed and absolutely positioned descendants"},
+      {"property": "offset", "trigger": "any non-initial value", "containing_block_for": "fixed and absolutely positioned descendants"}
+    ]
+  },
+
+  "pairwise_context_fields": {
+    "_description": "Based on the above analysis, these are the fields the pairwise context object needs to carry. This is the initial estimate — Stage 3 (chain-sensitive formalization) will refine this.",
+    "fields": [
+      {"name": "formatting_context", "type": "enum", "values": ["block", "inline", "flex", "grid", "table", "table-row", "table-cell", "multicol", "ruby", "svg", "mathml"], "reason": "Determines which layout algorithm applies to children"},
+      {"name": "containing_block_width", "type": "length", "reason": "Percentage resolution for horizontal properties"},
+      {"name": "containing_block_height", "type": "length", "reason": "Percentage resolution for vertical properties"},
+      {"name": "positioned_containing_block", "type": "reference", "reason": "For position:absolute children, which ancestor is their containing block"},
+      {"name": "fixed_containing_block", "type": "reference", "reason": "For position:fixed children (viewport unless transform/filter on ancestor)"},
+      {"name": "stacking_context", "type": "reference", "reason": "Current stacking context for z-ordering"},
+      {"name": "writing_mode", "type": "enum", "values": ["horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"], "reason": "Affects which axis is block/inline"},
+      {"name": "direction", "type": "enum", "values": ["ltr", "rtl"], "reason": "Affects inline direction"},
+      {"name": "font_size", "type": "length", "reason": "Needed for em units and font-size: larger/smaller"},
+      {"name": "line_height", "type": "length_or_number", "reason": "Inherited, affects inline layout"},
+      {"name": "color", "type": "color", "reason": "Inherited, used by currentcolor"},
+      {"name": "visibility", "type": "enum", "values": ["visible", "hidden", "collapse"], "reason": "Inherited"},
+      {"name": "text_align", "type": "enum", "reason": "Inherited, affects inline layout"},
+      {"name": "white_space", "type": "enum", "reason": "Inherited, affects text processing"},
+      {"name": "list_style_type", "type": "string", "reason": "Inherited, for list-item display"},
+      {"name": "border_collapse", "type": "enum", "values": ["separate", "collapse"], "reason": "Inherited within table context"},
+      {"name": "inherited_properties", "type": "map", "reason": "All remaining inherited CSS properties"},
+      {"name": "available_width", "type": "length", "reason": "Available space for child layout"},
+      {"name": "available_height", "type": "length_or_auto", "reason": "Available space for child layout (often auto/indefinite)"},
+      {"name": "is_root", "type": "bool", "reason": "Initial containing block special cases"},
+      {"name": "column_count", "type": "integer_or_auto", "reason": "For multicol formatting context"}
+    ],
+    "estimated_field_count": 21,
+    "assessment": "21 fields is well within the target of 20-30. The pairwise context model appears viable."
+  }
+}

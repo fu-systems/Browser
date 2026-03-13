@@ -1,0 +1,106 @@
+{
+  "tests": [
+    {
+      "name": "css_reset",
+      "file": "01_css_reset.html",
+      "description": "CSS reset patterns (margin:0, padding:0, box-sizing)",
+      "checks": {
+        "container": { "width": 560 },
+        "heading": { "width": 520 },
+        "para": { "width": 520 }
+      }
+    },
+    {
+      "name": "nav_header",
+      "file": "02_nav_header.html",
+      "description": "Flex navigation header with logo and nav items",
+      "checks": {
+        "header": { "width": 760, "height": 40 },
+        "logo": { "width": 60, "height": 40 }
+      }
+    },
+    {
+      "name": "card_layout",
+      "file": "03_card_layout.html",
+      "description": "CSS Grid card layout with 3 columns",
+      "checks": {
+        "grid": { "width": 760 },
+        "card1": { "width": 208 },
+        "card2": { "width": 208 },
+        "card3": { "width": 208 }
+      }
+    },
+    {
+      "name": "sidebar_layout",
+      "file": "04_sidebar_layout.html",
+      "description": "Flex sidebar + main content layout",
+      "checks": {
+        "page": { "x": 0, "y": 0, "width": 800 },
+        "sidebar": { "width": 160 },
+        "main": { "width": 520 }
+      }
+    },
+    {
+      "name": "form_layout",
+      "file": "05_form_layout.html",
+      "description": "Centered form with inputs and button (shorthand border/margin/padding)",
+      "checks": {
+        "form": { "width": 338 },
+        "group1": { "width": 340 },
+        "label1": { "width": 340, "height": 20 }
+      }
+    },
+    {
+      "name": "flex_centering",
+      "file": "06_flex_centering.html",
+      "description": "Flex column centering pattern",
+      "checks": {
+        "hero": { "width": 760, "height": 360 },
+        "htitle": { "width": 400, "height": 48 },
+        "hsub": { "width": 600, "height": 24 }
+      }
+    },
+    {
+      "name": "multi_column",
+      "file": "07_multi_column.html",
+      "description": "Multi-column flex rows (50/50, 33/33/33, 66/33)",
+      "checks": {
+        "row1": { "width": 800 },
+        "col1": { "width": 380 },
+        "col2": { "width": 380 },
+        "col3": { "width": 246 }
+      }
+    },
+    {
+      "name": "nested_flex",
+      "file": "08_nested_flex.html",
+      "description": "Nested flex containers (sidebar panel + content grid)",
+      "checks": {
+        "outer": { "width": 800, "height": 300 },
+        "panel": { "width": 178, "height": 278 },
+        "content": { "width": 560, "height": 280 }
+      }
+    },
+    {
+      "name": "table_data",
+      "file": "09_table_data.html",
+      "description": "Data table with thead/tbody and border shorthands",
+      "checks": {
+        "tbl": { "width": 600 }
+      }
+    },
+    {
+      "name": "margin_padding_shorthand",
+      "file": "10_margin_padding_shorthand.html",
+      "description": "Shorthand margin/padding/border with 1-4 values",
+      "checks": {
+        "m1": { "x": 10, "y": 10, "width": 200, "height": 50 },
+        "m2": { "x": 20, "y": 70, "width": 200, "height": 50 },
+        "m3": { "x": 20, "y": 130, "width": 200, "height": 50 },
+        "m4": { "x": 40, "y": 210, "width": 200, "height": 50 },
+        "p1": { "width": 170, "height": 20 },
+        "b1": { "width": 196, "height": 46 }
+      }
+    }
+  ]
+}

@@ -1,20 +1,29 @@
-# Flutter/Dart
-.dart_tool/
-.packages
+# C++ build artifacts
 build/
+build-*/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+*.o
+*.a
+*.so
+*.dylib
+
+# IDE
+.idea/
+.vscode/
 *.iml
 *.ipr
 *.iws
-.idea/
-.vscode/
+compile_commands.json
 
-# Platform build dirs
-linux/flutter/ephemeral/
-windows/flutter/ephemeral/
-macos/Flutter/ephemeral/
+# Archive build artifacts
+archive/phase1-dart/dist/
+archive/phase1-dart/build/
 
 # Misc
 *.swp
 *.swo
 *~
 .DS_Store
+__pycache__/
